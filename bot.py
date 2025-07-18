@@ -33,17 +33,17 @@ def init_db():
     try:
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
+            # Таблица users адаптирована под Excel: без student_id, blood_group, medical_exemption
             cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 telegram_id INTEGER UNIQUE,
                 phone TEXT,
                 name TEXT,
                 surname TEXT,
-                student_id TEXT,
-                blood_group TEXT,
-                medical_exemption TEXT,
                 category TEXT,
                 user_group TEXT,
+                social_contacts TEXT,
+                dkm BOOLEAN DEFAULT 0,
                 consent BOOLEAN DEFAULT 0,
                 profile_status TEXT DEFAULT 'pending'
             )''')
@@ -61,6 +61,7 @@ def init_db():
                 user_id INTEGER,
                 event_id INTEGER,
                 status TEXT DEFAULT 'registered',
+                attended BOOLEAN DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 FOREIGN KEY (event_id) REFERENCES events(id)
             )''')
@@ -71,6 +72,19 @@ def init_db():
                 reminder_date TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 FOREIGN KEY (event_id) REFERENCES events(id)
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS donations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                date TEXT,
+                center TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS non_attendance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                registration_id INTEGER,
+                reason TEXT,
+                FOREIGN KEY (registration_id) REFERENCES registrations(id)
             )''')
             cursor.execute('''CREATE TABLE IF NOT EXISTS info_sections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +105,7 @@ def init_db():
         logger.error(f"Ошибка инициализации базы данных: {e}")
         raise
 
-# Функция импорта данных из Excel
+# Функция импорта данных из Excel (адаптировано: без student_id и т.п., добавлены social_contacts, dkm=0 по умолчанию)
 def import_from_excel():
     try:
         logger.info("Начало импорта данных из Excel")
@@ -119,8 +133,9 @@ def import_from_excel():
                 user_group = str(row[1]).strip() if row[1] else ''
                 # Определяем категорию
                 category = ('сотрудник' if 'сотрудник' in user_group.lower() or 'инженер' in user_group.lower()
-                          else 'студент' if re.match(r'^[А-Я]\d{2}-\d{3}$', user_group)
-                          else 'внешний')
+                            else 'студент' if re.match(r'^[А-Я]\d{2}-\d{3}$', user_group)
+                            else 'внешний')
+                social_contacts = str(row[7]).strip() if row[7] else None
                 phone = str(row[8]).strip() if row[8] else None
                 if not phone:
                     logger.warning(f"Пропущена строка для ФИО {fio}: отсутствует номер телефона")
@@ -128,9 +143,21 @@ def import_from_excel():
                     continue
                 try:
                     cursor.execute('''INSERT OR REPLACE INTO users 
-                        (phone, name, surname, category, user_group, profile_status)
-                        VALUES (?, ?, ?, ?, ?, 'approved')''',
-                        (phone, name, surname, category, user_group))
+                        (phone, name, surname, category, user_group, social_contacts, profile_status)
+                        VALUES (?, ?, ?, ?, ?, ?, 'approved')''',
+                        (phone, name, surname, category, user_group, social_contacts))
+                    user_id = cursor.lastrowid
+                    # Импорт донаций (кол-во -> добавить записи, но поскольку дат много, добавим placeholder даты)
+                    count_gavrilov = int(row[2]) if row[2] else 0
+                    count_fmba = int(row[3]) if row[3] else 0
+                    last_gavrilov = row[5] if row[5] else None
+                    last_fmba = row[6] if row[6] else None
+                    for _ in range(count_gavrilov):
+                        cursor.execute('INSERT INTO donations (user_id, date, center) VALUES (?, ?, ?)',
+                                       (user_id, last_gavrilov or 'unknown', 'Гаврилова'))
+                    for _ in range(count_fmba):
+                        cursor.execute('INSERT INTO donations (user_id, date, center) VALUES (?, ?, ?)',
+                                       (user_id, last_fmba or 'unknown', 'ФМБА'))
                     imported_count += 1
                     logger.info(f"Импортирован пользователь: {name} {surname}, телефон: {phone}, категория: {category}, группа: {user_group}")
                 except sqlite3.Error as e:
@@ -145,16 +172,14 @@ def import_from_excel():
         logger.error(f"Ошибка импорта Excel: {e}")
         raise
 
-# Классы состояний
+# Классы состояний (адаптировано: убраны blood_group, medical_exemption, student_id)
 class ProfilRegStates(StatesGroup):
     phone_confirm = State()
     name = State()
     surname = State()
     category = State()
     group = State()
-    student_id = State()
-    blood_group = State()
-    medical_exemption = State()
+    social_contacts = State()  # Добавлено для соцсетей (optional)
 
 class ConsentStates(StatesGroup):
     consent = State()
@@ -205,8 +230,8 @@ async def process_phone(message: types.Message, state: FSMContext):
             user = cursor.fetchone()
         await state.update_data(phone=phone)
         if user:
-            await state.update_data(name=user[3], surname=user[2], category=user[8], group=user[9])
-            response = f"Вы уже в базе: {user[3]} {user[2]}, категория: {user[8]}, группа: {user[9]}.\nПодтверждаете? (Да/Нет)"
+            await state.update_data(name=user[3], surname=user[2], category=user[5], group=user[6], social_contacts=user[7])
+            response = f"Вы уже в базе: {user[3]} {user[2]}, категория: {user[5]}, группа: {user[6]}.\nПодтверждаете? (Да/Нет)"
             keyboard = InlineKeyboardBuilder()
             keyboard.button(text="Да", callback_data="confirm_yes")
             keyboard.button(text="Нет", callback_data="confirm_no")
@@ -234,7 +259,7 @@ async def confirm_existing(callback_query: types.CallbackQuery, state: FSMContex
                 keyboard.button(text="Согласен", callback_data="consent_yes")
                 keyboard.button(text="Нет", callback_data="consent_no")
                 await callback_query.message.answer("Примите условия: согласие на обработку ПДн и рассылки.",
-                                                   reply_markup=keyboard.as_markup())
+                                                    reply_markup=keyboard.as_markup())
                 logger.info(f"Пользователь {phone} должен подтвердить согласие")
             else:
                 await callback_query.message.answer("Авторизация успешна!")
@@ -308,8 +333,8 @@ async def process_category(callback_query: types.CallbackQuery, state: FSMContex
         await state.set_state(ProfilRegStates.group)
         await callback_query.message.answer("Введите номер группы (формат: Б21-302):")
     else:
-        await state.set_state(ProfilRegStates.student_id)
-        await callback_query.message.answer("Введите номер студенческого билета (или пропустите для внешних):")
+        await state.set_state(ProfilRegStates.social_contacts)
+        await callback_query.message.answer("Введите контакты в соцсетях (или 'нет'):")
     await callback_query.answer()
     logger.info(f"Пользователь {callback_query.from_user.id} выбрал категорию: {category}")
 
@@ -321,48 +346,21 @@ async def process_group(message: types.Message, state: FSMContext):
         logger.warning(f"Некорректный формат группы от пользователя {message.from_user.id}: {group}")
         return
     await state.update_data(group=group)
-    await state.set_state(ProfilRegStates.student_id)
-    await message.answer("Введите номер студенческого билета:")
+    await state.set_state(ProfilRegStates.social_contacts)
+    await message.answer("Введите контакты в соцсетях (или 'нет'):")
 
-@dp.message(ProfilRegStates.student_id)
-async def process_student_id(message: types.Message, state: FSMContext):
-    student_id = message.text.strip()
-    if not re.match(r'^\w+$', student_id):
-        await message.answer("Номер билета должен содержать буквы/цифры. Попробуйте снова.")
-        logger.warning(f"Некорректный номер студенческого билета от пользователя {message.from_user.id}: {student_id}")
-        return
-    await state.update_data(student_id=student_id)
-    await state.set_state(ProfilRegStates.blood_group)
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=group)] for group in ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-']],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await message.answer("Выберите группу крови:", reply_markup=keyboard)
-
-@dp.message(ProfilRegStates.blood_group)
-async def process_blood_group(message: types.Message, state: FSMContext):
-    blood_group = message.text.strip()
-    valid_groups = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-']
-    if blood_group not in valid_groups:
-        await message.answer("Неверная группа крови. Выберите из списка.")
-        logger.warning(f"Некорректная группа крови от пользователя {message.from_user.id}: {blood_group}")
-        return
-    await state.update_data(blood_group=blood_group)
-    await state.set_state(ProfilRegStates.medical_exemption)
-    await message.answer("Введите информацию о медицинских отводах (или 'нет'):")
-
-@dp.message(ProfilRegStates.medical_exemption)
-async def process_medical_exemption(message: types.Message, state: FSMContext):
+@dp.message(ProfilRegStates.social_contacts)
+async def process_social_contacts(message: types.Message, state: FSMContext):
+    social_contacts = message.text.strip() if message.text.strip().lower() != 'нет' else None
     data = await state.get_data()
     try:
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
             cursor.execute('''INSERT OR IGNORE INTO users 
-                (telegram_id, phone, name, surname, student_id, blood_group, medical_exemption, category, user_group, profile_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')''',
-                (message.from_user.id, data.get('phone'), data['name'], data['surname'], data['student_id'],
-                 data['blood_group'], message.text, data['category'], data.get('group')))
+                (telegram_id, phone, name, surname, category, user_group, social_contacts, profile_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')''',
+                (message.from_user.id, data.get('phone'), data['name'], data['surname'],
+                 data['category'], data.get('group'), social_contacts))
             conn.commit()
             logger.info(f"Профиль пользователя {data['name']} {data['surname']} отправлен на модерацию")
         await state.clear()
@@ -374,12 +372,12 @@ async def process_medical_exemption(message: types.Message, state: FSMContext):
 @dp.message(Command(commands=['help']))
 async def help_handler(message: types.Message):
     await message.answer("Вот команды пользователя:\n"
-                        "/profilReg - Зарегистрировать профиль\n"
-                        "/reg - Записаться на мероприятие\n"
-                        "/profil - Посмотреть/изменить профиль\n"
-                        "/stats - Моя статистика\n"
-                        "/info - Информационные разделы\n"
-                        "/help - Показать этот список")
+                         "/profilReg - Зарегистрировать профиль\n"
+                         "/reg - Записаться на мероприятие\n"
+                         "/profil - Посмотреть/изменить профиль\n"
+                         "/stats - Моя статистика\n"
+                         "/info - Информационные разделы\n"
+                         "/help - Показать этот список")
     logger.info(f"Пользователь {message.from_user.id} вызвал команду /help")
 
 @dp.message(Command(commands=['reg']))
@@ -415,12 +413,6 @@ async def process_register(callback_query: types.CallbackQuery):
     try:
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT medical_exemption FROM users WHERE telegram_id = ?', (user_id,))
-            user = cursor.fetchone()
-            if user[0] and user[0].lower() != 'нет':
-                await callback_query.answer("У вас есть медицинские отводы.")
-                logger.warning(f"Пользователь {user_id} имеет медицинские отводы: {user[0]}")
-                return
             cursor.execute('SELECT id FROM users WHERE telegram_id = ?', (user_id,))
             db_user_id = cursor.fetchone()[0]
             cursor.execute('SELECT capacity FROM events WHERE id = ?', (event_id,))
@@ -441,7 +433,7 @@ async def process_register(callback_query: types.CallbackQuery):
                 return
             cursor.execute('INSERT INTO registrations (user_id, event_id) VALUES (?, ?)', (db_user_id, event_id))
             cursor.execute('INSERT INTO reminders (user_id, event_id, reminder_date) VALUES (?, ?, ?)',
-                          (db_user_id, event_id, reminder_date))
+                           (db_user_id, event_id, reminder_date))
             conn.commit()
             logger.info(f"Пользователь {user_id} зарегистрирован на мероприятие {event_id}")
         await callback_query.answer("Вы зарегистрированы!")
@@ -455,48 +447,37 @@ async def profil_handler(message: types.Message, state: FSMContext):
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT name, surname, student_id, blood_group, medical_exemption, profile_status, category, user_group FROM users WHERE telegram_id = ?',
+                'SELECT id, name, surname, category, user_group, social_contacts, dkm, profile_status FROM users WHERE telegram_id = ?',
                 (message.from_user.id,))
             user = cursor.fetchone()
-        if not user:
-            await message.answer("Профиль не найден.")
-            logger.warning(f"Профиль пользователя {message.from_user.id} не найден")
-            return
-        response = (
-            f"Ваш профиль:\nИмя: {user[0]}\nФамилия: {user[1]}\nКатегория: {user[6]}\nГруппа: {user[7]}\nСтуд. билет: {user[2]}\n"
-            f"Группа крови: {user[3]}\nМед. отводы: {user[4]}\nСтатус: {user[5]}")
-        keyboard = InlineKeyboardBuilder()
-        keyboard.button(text="Изменить отводы", callback_data="edit_exemption")
-        await message.answer(response, reply_markup=keyboard.as_markup())
+            if not user:
+                await message.answer("Профиль не найден.")
+                logger.warning(f"Профиль пользователя {message.from_user.id} не найден")
+                return
+            user_id = user[0]
+            # Вычисление статистики из donations
+            cursor.execute('SELECT COUNT(*) FROM donations WHERE user_id = ? AND center = "Гаврилова"', (user_id,))
+            count_gavrilov = cursor.fetchone()[0]
+            cursor.execute('SELECT COUNT(*) FROM donations WHERE user_id = ? AND center = "ФМБА"', (user_id,))
+            count_fmba = cursor.fetchone()[0]
+            sum_donations = count_gavrilov + count_fmba
+            cursor.execute('SELECT MAX(date), center FROM donations WHERE user_id = ? GROUP BY center ORDER BY date DESC LIMIT 1', (user_id,))
+            last_donation = cursor.fetchone()
+            last_date_center = f"{last_donation[0]} / {last_donation[1]}" if last_donation else "Нет"
+            cursor.execute('SELECT date, center FROM donations WHERE user_id = ? ORDER BY date DESC', (user_id,))
+            history = cursor.fetchall()
+            history_str = "\n".join([f"{d[0]} - {d[1]}" for d in history]) if history else "Нет истории"
+            dkm_str = "Да" if user[6] else "Нет"
+            response = (
+                f"Ваш профиль:\nИмя: {user[1]}\nФамилия: {user[2]}\nКатегория: {user[3]}\nГруппа: {user[4]}\n"
+                f"Соцсети: {user[5] or 'Нет'}\nСтатус: {user[7]}\n"
+                f"Количество донаций: {sum_donations}\nПоследняя донация: {last_date_center}\n"
+                f"Вступление в ДКМ: {dkm_str}\nИстория донаций:\n{history_str}")
+        await message.answer(response)
         logger.info(f"Пользователь {message.from_user.id} запросил просмотр профиля")
     except sqlite3.Error as e:
         logger.error(f"Ошибка при получении профиля пользователя {message.from_user.id}: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже.")
-
-@dp.callback_query(lambda c: c.data == 'edit_exemption')
-async def edit_exemption(callback_query: types.CallbackQuery, state: FSMContext):
-    await state.set_state(ProfilEditStates.value)
-    await state.update_data(field='medical_exemption')
-    await callback_query.message.answer("Введите новые данные о медицинских отводах:")
-    await callback_query.answer()
-    logger.info(f"Пользователь {callback_query.from_user.id} начал редактирование медицинских отводов")
-
-@dp.message(ProfilEditStates.value)
-async def process_edit_value(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    field = data['field']
-    value = message.text
-    try:
-        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
-            cursor = conn.cursor()
-            cursor.execute(f'UPDATE users SET {field} = ? WHERE telegram_id = ?', (value, message.from_user.id))
-            conn.commit()
-        await state.clear()
-        await message.answer("Данные обновлены.")
-        logger.info(f"Пользователь {message.from_user.id} обновил поле {field}")
-    except sqlite3.Error as e:
-        logger.error(f"Ошибка при обновлении поля {field} для пользователя {message.from_user.id}: {e}")
-        await message.answer("Произошла ошибка при обновлении данных. Попробуйте позже.")
 
 @dp.message(Command(commands=['stats']))
 async def stats_handler(message: types.Message):
@@ -552,7 +533,7 @@ async def admin_reg_handler(message: types.Message):
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT id, name, surname, student_id, blood_group, medical_exemption FROM users WHERE profile_status = "pending"')
+                'SELECT id, name, surname, user_group, social_contacts FROM users WHERE profile_status = "pending"')
             pending_users = cursor.fetchall()
         if not pending_users:
             await message.answer("Нет заявок.")
@@ -563,7 +544,7 @@ async def admin_reg_handler(message: types.Message):
             keyboard.button(text="Принять", callback_data=f"approve_{user[0]}")
             keyboard.button(text="Отклонить", callback_data=f"reject_{user[0]}")
             await message.answer(
-                f"Заявка: {user[1]} {user[2]}\nСтуд. билет: {user[3]}\nКровь: {user[4]}\nОтводы: {user[5]}",
+                f"Заявка: {user[1]} {user[2]}\nГруппа: {user[3]}\nСоцсети: {user[4]}",
                 reply_markup=keyboard.as_markup())
             logger.info(f"Отображена заявка пользователя {user[1]} {user[2]} для админа {message.from_user.id}")
     except sqlite3.Error as e:
@@ -597,13 +578,15 @@ async def admin_help_handler(message: types.Message):
         logger.warning(f"Пользователь {message.from_user.id} пытался получить админскую помощь")
         return
     await message.answer("/admin_stats - Статистика проекта\n"
-                        "/admin_reg - Управление заявками\n"
-                        "/add_event - Добавить мероприятие\n"
-                        "/stats_event - Статистика мероприятий\n"
-                        "/see_profile - Просмотр профилей\n"
-                        "/import_excel - Импорт из Excel\n"
-                        "/edit_info - Редактировать инфо разделы\n"
-                        "/help - Список пользовательских команд")
+                         "/admin_reg - Управление заявками\n"
+                         "/add_event - Добавить мероприятие\n"
+                         "/stats_event - Статистика мероприятий\n"
+                         "/see_profile - Просмотр профилей\n"
+                         "/import_excel - Импорт из Excel\n"
+                         "/edit_info - Редактировать инфо разделы\n"
+                         "/upload_stats - Загрузить статистику из Excel\n"
+                         "/export_stats - Выгрузить статистику в Excel\n"
+                         "/help - Список пользовательских команд")
     logger.info(f"Админ {message.from_user.id} запросил список админских команд")
 
 @dp.message(Command(commands=['add_event']))
@@ -662,7 +645,7 @@ async def process_event_capacity(message: types.Message, state: FSMContext):
             cursor = conn.cursor()
             cursor.execute('''INSERT INTO events (date, time, location, description, capacity)
                             VALUES (?, ?, ?, ?, ?)''',
-                          (data['date'], data['time'], data['location'], data['description'], capacity))
+                           (data['date'], data['time'], data['location'], data['description'], capacity))
             conn.commit()
             logger.info(f"Админ {message.from_user.id} добавил мероприятие: {data['description']}")
         await state.clear()
@@ -685,12 +668,14 @@ async def stats_event_handler(message: types.Message):
             for event in events:
                 cursor.execute('SELECT COUNT(*) FROM registrations WHERE event_id = ? AND status = "registered"', (event[0],))
                 reg_count = cursor.fetchone()[0]
+                cursor.execute('SELECT COUNT(*) FROM registrations WHERE event_id = ? AND attended = 1', (event[0],))
+                donors_count = cursor.fetchone()[0]
                 keyboard = InlineKeyboardBuilder()
                 keyboard.button(text="Заморозить" if event[5] == 'active' else "Разморозить",
-                               callback_data=f"toggle_{event[0]}")
+                                callback_data=f"toggle_{event[0]}")
                 await message.answer(f"Мероприятие: {event[1]} {event[2]} - {event[3]}\n"
-                                    f"Вместимость: {event[4]}\nЗарегистрировано: {reg_count}\nСтатус: {event[5]}",
-                                    reply_markup=keyboard.as_markup())
+                                     f"Вместимость: {event[4]}\nЗарегистрировано: {reg_count}\nДоноров: {donors_count}\nСтатус: {event[5]}",
+                                     reply_markup=keyboard.as_markup())
                 logger.info(f"Админ {message.from_user.id} запросил статистику мероприятия ID {event[0]}")
     except sqlite3.Error as e:
         logger.error(f"Ошибка при получении статистики мероприятий: {e}")
@@ -725,7 +710,7 @@ async def show_profiles(message: types.Message, offset: int):
     try:
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT id, name, surname, student_id FROM users LIMIT 5 OFFSET ?', (offset,))
+            cursor.execute('SELECT id, name, surname, user_group FROM users LIMIT 5 OFFSET ?', (offset,))
             users = cursor.fetchall()
             if not users:
                 await message.answer("Профили не найдены.")
@@ -735,7 +720,7 @@ async def show_profiles(message: types.Message, offset: int):
             for user in users:
                 cursor.execute('SELECT COUNT(*) FROM registrations WHERE user_id = ? AND status = "registered"', (user[0],))
                 reg_count = cursor.fetchone()[0]
-                text = f"{user[2]} {user[1]}, Билет: {user[3]}, (ID: {user[0]}), Регистраций: {reg_count}"
+                text = f"{user[2]} {user[1]}, Группа: {user[3]}, (ID: {user[0]}), Регистраций: {reg_count}"
                 keyboard.button(text="Подробнее", callback_data=f"detail_{user[0]}")
                 keyboard.button(text=text, callback_data="noop")
             if offset > 0:
@@ -764,12 +749,14 @@ async def show_user_detail(callback_query: types.CallbackQuery):
         response = (f"Полная анкета:\n"
                     f"ID: {user[0]}\n"
                     f"Telegram ID: {user[1]}\n"
-                    f"Имя: {user[2]}\n"
-                    f"Фамилия: {user[3]}\n"
-                    f"Студ. билет: {user[4]}\n"
-                    f"Группа крови: {user[5]}\n"
-                    f"Мед. отводы: {user[6]}\n"
-                    f"Статус: {user[7]}")
+                    f"Телефон: {user[2]}\n"
+                    f"Имя: {user[3]}\n"
+                    f"Фамилия: {user[4]}\n"
+                    f"Категория: {user[5]}\n"
+                    f"Группа: {user[6]}\n"
+                    f"Соцсети: {user[7]}\n"
+                    f"DKM: {'Да' if user[8] else 'Нет'}\n"
+                    f"Статус: {user[10]}")
         keyboard = InlineKeyboardBuilder()
         keyboard.button(text="Кикнуть", callback_data=f"kick_{user_id}")
         await callback_query.message.answer(response, reply_markup=keyboard.as_markup())
@@ -817,15 +804,95 @@ async def import_excel_handler(message: types.Message):
         await message.answer(f"Ошибка при импорте данных: {str(e)}")
         logger.error(f"Ошибка при импорте Excel админом {message.from_user.id}: {e}")
 
-# --- Напоминания ---
+@dp.message(Command(commands=['upload_stats']))
+async def upload_stats_handler(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав.")
+        return
+    await message.answer("Отправьте файл Excel со статистикой (ФИО, дата, ЦК).")
+
+@dp.message(lambda message: message.document and message.document.file_name.endswith('.xlsx'))
+async def process_upload_stats(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав.")
+        return
+    try:
+        file_id = message.document.file_id
+        file = await bot.get_file(file_id)
+        file_path = file.file_path
+        await bot.download_file(file_path, "temp_stats.xlsx")
+        wb = openpyxl.load_workbook('temp_stats.xlsx')
+        sheet = wb.active
+        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
+            cursor = conn.cursor()
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                fio = str(row[0]).strip()
+                parts = fio.split(maxsplit=1)
+                surname = parts[0]
+                name = parts[1] if len(parts) > 1 else ''
+                date = str(row[5]) if row[5] else None  # Пример: дата Гаврилова или ФМБА
+                center = 'Гаврилова' if row[2] else 'ФМБА' if row[3] else None
+                if not center or not date:
+                    continue
+                cursor.execute('SELECT id FROM users WHERE name = ? AND surname = ?', (name, surname))
+                user = cursor.fetchone()
+                if user:
+                    user_id = user[0]
+                    cursor.execute('INSERT INTO donations (user_id, date, center) VALUES (?, ?, ?)', (user_id, date, center))
+                # Если DKM (допустим, добавим колонку 9 как DKM)
+                if len(row) > 9 and row[9]:
+                    cursor.execute('UPDATE users SET dkm = 1 WHERE id = ?', (user_id,))
+            conn.commit()
+        await message.answer("Статистика загружена и БД обновлена.")
+        logger.info(f"Админ {message.from_user.id} загрузил статистику из Excel")
+    except Exception as e:
+        await message.answer(f"Ошибка при загрузке: {str(e)}")
+        logger.error(f"Ошибка загрузки stats Excel: {e}")
+
+@dp.message(Command(commands=['export_stats']))
+async def export_stats_handler(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав.")
+        return
+    try:
+        wb = openpyxl.Workbook()
+        sheet = wb.active
+        sheet.append(['ID', 'ФИО', 'Группа', 'Кол-во Гаврилова', 'Кол-во ФМБА', 'Сумма', 'Последняя Гаврилова', 'Последняя ФМБА', 'Телефон'])
+        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM users')
+            users = cursor.fetchall()
+            for user in users:
+                user_id = user[0]
+                fio = f"{user[4]} {user[3]}"
+                group = user[6]
+                phone = user[2]
+                cursor.execute('SELECT COUNT(*) FROM donations WHERE user_id = ? AND center = "Гаврилова"', (user_id,))
+                count_g = cursor.fetchone()[0]
+                cursor.execute('SELECT COUNT(*) FROM donations WHERE user_id = ? AND center = "ФМБА"', (user_id,))
+                count_f = cursor.fetchone()[0]
+                sum_d = count_g + count_f
+                cursor.execute('SELECT MAX(date) FROM donations WHERE user_id = ? AND center = "Гаврилова"', (user_id,))
+                last_g = cursor.fetchone()[0] or ''
+                cursor.execute('SELECT MAX(date) FROM donations WHERE user_id = ? AND center = "ФМБА"', (user_id,))
+                last_f = cursor.fetchone()[0] or ''
+                sheet.append([user_id, fio, group, count_g, count_f, sum_d, last_g, last_f, phone])
+        wb.save('export_stats.xlsx')
+        await bot.send_document(message.chat.id, types.FSInputFile('export_stats.xlsx'))
+        logger.info(f"Админ {message.from_user.id} выгрузил статистику")
+    except Exception as e:
+        await message.answer(f"Ошибка при выгрузке: {str(e)}")
+        logger.error(f"Ошибка выгрузки stats: {e}")
+
+# --- Напоминания и опросы ---
 
 async def check_reminders():
     try:
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT id, user_id, event_id, reminder_date FROM reminders WHERE reminder_date <= ?',
-                          (datetime.now().strftime('%Y-%m-%d'),))
-            напоминания = cursor.fetchall()
+                           (datetime.now().strftime('%Y-%m-%d'),))
+            reminders = cursor.fetchall()  # Исправлено имя переменной
             for reminder in reminders:
                 user_id = reminder[1]
                 event_id = reminder[2]
@@ -838,6 +905,46 @@ async def check_reminders():
             conn.commit()
     except sqlite3.Error as e:
         logger.error(f"Ошибка при проверке напоминаний: {e}")
+
+async def check_non_attendance():
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM events WHERE date < ? AND status = "active"', (today,))
+            past_events = cursor.fetchall()
+            for event in past_events:
+                event_id = event[0]
+                cursor.execute('SELECT id, user_id FROM registrations WHERE event_id = ? AND status = "registered" AND attended = 0', (event_id,))
+                non_attended = cursor.fetchall()
+                for reg in non_attended:
+                    reg_id = reg[0]
+                    user_id = reg[1]
+                    keyboard = InlineKeyboardBuilder()
+                    keyboard.button(text="Медотвод", callback_data=f"reason_med_{reg_id}")
+                    keyboard.button(text="Личные причины", callback_data=f"reason_personal_{reg_id}")
+                    keyboard.button(text="Не захотел", callback_data=f"reason_no_want_{reg_id}")
+                    await bot.send_message(user_id, "Вы зарегистрировались на прошедшее мероприятие, но не пришли. Укажите причину:", reply_markup=keyboard.as_markup())
+                    logger.info(f"Отправлен опрос неявки пользователю {user_id} для reg {reg_id}")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при проверке неявок: {e}")
+
+@dp.callback_query(lambda c: c.data.startswith('reason_'))
+async def process_non_attendance_reason(callback_query: types.CallbackQuery):
+    parts = callback_query.data.split('_')
+    reason_type = parts[1]
+    reg_id = int(parts[2])
+    reason = {'med': 'медотвод', 'personal': 'личные причины', 'no': 'не захотел'}[reason_type]
+    try:
+        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO non_attendance (registration_id, reason) VALUES (?, ?)', (reg_id, reason))
+            conn.commit()
+        await callback_query.answer("Причина записана.")
+        logger.info(f"Записана причина неявки для reg {reg_id}: {reason}")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка записи причины неявки для reg {reg_id}: {e}")
+        await callback_query.answer("Ошибка. Попробуйте позже.")
 
 async def schedule_checker():
     while True:
@@ -852,7 +959,8 @@ async def main():
     try:
         init_db()
         import_from_excel()
-        schedule.every(1).minutes.do(lambda: asyncio.create_task(check_reminders()))
+        schedule.every(10).minutes.do(lambda: asyncio.create_task(check_reminders()))  # Изменено на 10 мин
+        schedule.every().day.at("00:00").do(lambda: asyncio.create_task(check_non_attendance()))  # Ежедневный опрос
         await dp.start_polling(bot, skip_updates=True, on_startup=on_startup)
     except Exception as e:
         logger.error(f"Критическая ошибка при запуске бота: {e}")
