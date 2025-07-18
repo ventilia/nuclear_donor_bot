@@ -28,7 +28,12 @@ TOKEN = "7893139526:AAEw3mRwp8btOI4HWWhbLzL0j48kaQBUa50"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Функция инициализации базы данных
+# Функция проверки администратора (добавлен новый ID 1191457973)
+def is_admin(user_id):
+    admins = [123456789, 1653833795, 1191457973]  # Добавлен новый администратор
+    return user_id in admins
+
+# Функция инициализации базы данных (с добавлением проверок на уникальность и логированием)
 def init_db():
     try:
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
@@ -105,7 +110,7 @@ def init_db():
         logger.error(f"Ошибка инициализации базы данных: {e}")
         raise
 
-# Функция импорта данных из Excel (адаптировано: без student_id и т.п., добавлены social_contacts, dkm=0 по умолчанию)
+# Функция импорта данных из Excel (с добавлением проверок на уникальность телефона и логированием)
 def import_from_excel():
     try:
         logger.info("Начало импорта данных из Excel")
@@ -139,6 +144,12 @@ def import_from_excel():
                 phone = str(row[8]).strip() if row[8] else None
                 if not phone:
                     logger.warning(f"Пропущена строка для ФИО {fio}: отсутствует номер телефона")
+                    skipped_count += 1
+                    continue
+                # Проверка на уникальность телефона
+                cursor.execute('SELECT id FROM users WHERE phone = ?', (phone,))
+                if cursor.fetchone():
+                    logger.warning(f"Пропущена строка для ФИО {fio}: телефон {phone} уже существует")
                     skipped_count += 1
                     continue
                 try:
@@ -198,10 +209,6 @@ class AddEventStates(StatesGroup):
 class EditInfoStates(StatesGroup):
     section = State()
     text = State()
-
-def is_admin(user_id):
-    admins = [123456789, 1653833795]
-    return user_id in admins
 
 # --- Команды пользователя ---
 
@@ -582,6 +589,7 @@ async def admin_help_handler(message: types.Message):
                          "/add_event - Добавить мероприятие\n"
                          "/stats_event - Статистика мероприятий\n"
                          "/see_profile - Просмотр профилей\n"
+                         "/see_profile (числовый аргумент) - Просмотр конкретного пользователя по айди\n"
                          "/import_excel - Импорт из Excel\n"
                          "/edit_info - Редактировать инфо разделы\n"
                          "/upload_stats - Загрузить статистику из Excel\n"
@@ -704,7 +712,48 @@ async def see_profile_handler(message: types.Message):
         await message.answer("Нет прав.")
         logger.warning(f"Пользователь {message.from_user.id} пытался просмотреть профили")
         return
+    # Проверка на аргумент (поиск по ID)
+    args = message.text.split()
+    if len(args) > 1:
+        try:
+            search_id = int(args[1])
+            await show_user_detail_by_id(message, search_id)
+            return
+        except ValueError:
+            await message.answer("Некорректный ID. Используйте формат /see_profile <число>.")
+            logger.warning(f"Некорректный ID в поиске от админа {message.from_user.id}: {args[1]}")
+            return
+    # Если нет аргумента, показываем список с пагинацией
     await show_profiles(message, offset=0)
+
+async def show_user_detail_by_id(message: types.Message, user_id: int):
+    try:
+        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+            user = cursor.fetchone()
+        if not user:
+            await message.answer("Пользователь не найден.")
+            logger.warning(f"Пользователь ID {user_id} не найден для админа {message.from_user.id}")
+            return
+        response = (f"Полная анкета:\n"
+                    f"ID: {user[0]}\n"
+                    f"Telegram ID: {user[1]}\n"
+                    f"Телефон: {user[2]}\n"
+                    f"Имя: {user[3]}\n"
+                    f"Фамилия: {user[4]}\n"
+                    f"Категория: {user[5]}\n"
+                    f"Группа: {user[6]}\n"
+                    f"Соцсети: {user[7]}\n"
+                    f"DKM: {'Да' if user[8] else 'Нет'}\n"
+                    f"Статус: {user[10]}")
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="Кикнуть", callback_data=f"kick_{user_id}")
+        await message.answer(response, reply_markup=keyboard.as_markup())
+        logger.info(f"Админ {message.from_user.id} запросил детали профиля по ID {user_id}")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при получении деталей профиля ID {user_id}: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
 
 async def show_profiles(message: types.Message, offset: int):
     try:
@@ -716,19 +765,24 @@ async def show_profiles(message: types.Message, offset: int):
                 await message.answer("Профили не найдены.")
                 logger.info("Профили пользователей не найдены")
                 return
-            keyboard = InlineKeyboardBuilder()
+            # Пагинационные кнопки
+            pagination_keyboard = InlineKeyboardBuilder()
+            if offset > 0:
+                pagination_keyboard.button(text="Назад", callback_data=f"prev_{offset - 5}")
+            if len(users) == 5:
+                pagination_keyboard.button(text="Вперед", callback_data=f"next_{offset + 5}")
+            pagination_markup = pagination_keyboard.as_markup() if pagination_keyboard.buttons else None
+            # Для каждого пользователя: текст + кнопка "Подробнее"
             for user in users:
                 cursor.execute('SELECT COUNT(*) FROM registrations WHERE user_id = ? AND status = "registered"', (user[0],))
                 reg_count = cursor.fetchone()[0]
                 text = f"{user[2]} {user[1]}, Группа: {user[3]}, (ID: {user[0]}), Регистраций: {reg_count}"
+                keyboard = InlineKeyboardBuilder()
                 keyboard.button(text="Подробнее", callback_data=f"detail_{user[0]}")
-                keyboard.button(text=text, callback_data="noop")
-            if offset > 0:
-                keyboard.button(text="Назад", callback_data=f"prev_{offset - 5}")
-            if len(users) == 5:
-                keyboard.button(text="Вперед", callback_data=f"next_{offset + 5}")
-            keyboard.adjust(1, 1)
-            await message.answer("Список профилей:", reply_markup=keyboard.as_markup())
+                await message.answer(text, reply_markup=keyboard.as_markup())
+            # Отправляем пагинационные кнопки отдельно, если есть
+            if pagination_markup:
+                await message.answer("Навигация:", reply_markup=pagination_markup)
             logger.info(f"Админ {message.from_user.id} запросил список профилей, offset: {offset}")
     except sqlite3.Error as e:
         logger.error(f"Ошибка при получении списка профилей: {e}")
@@ -892,7 +946,7 @@ async def check_reminders():
             cursor = conn.cursor()
             cursor.execute('SELECT id, user_id, event_id, reminder_date FROM reminders WHERE reminder_date <= ?',
                            (datetime.now().strftime('%Y-%m-%d'),))
-            reminders = cursor.fetchall()  # Исправлено имя переменной
+            reminders = cursor.fetchall()
             for reminder in reminders:
                 user_id = reminder[1]
                 event_id = reminder[2]
@@ -934,7 +988,7 @@ async def process_non_attendance_reason(callback_query: types.CallbackQuery):
     parts = callback_query.data.split('_')
     reason_type = parts[1]
     reg_id = int(parts[2])
-    reason = {'med': 'медотвод', 'personal': 'личные причины', 'no': 'не захотел'}[reason_type]
+    reason = {'med': 'медотвод', 'personal': 'личные причины', 'no': 'не захотел'}[reason_type]  # Исправлено 'no_want' на 'no'
     try:
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
