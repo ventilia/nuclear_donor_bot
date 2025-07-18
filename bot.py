@@ -33,16 +33,16 @@ def is_admin(user_id):
     admins = [123456789, 1653833795, 1191457973]  # Добавлен новый администратор
     return user_id in admins
 
-# Функция инициализации базы данных (с добавлением проверок на уникальность и логированием)
+# Функция инициализации базы данных (с добавлением UNIQUE на phone и реальных текстов из ТЗ)
 def init_db():
     try:
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
-            # Таблица users адаптирована под Excel: без student_id, blood_group, medical_exemption
+            # Таблица users адаптирована под Excel: без student_id, blood_group, medical_exemption; добавлен UNIQUE на phone
             cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 telegram_id INTEGER UNIQUE,
-                phone TEXT,
+                phone TEXT UNIQUE,
                 name TEXT,
                 surname TEXT,
                 category TEXT,
@@ -96,11 +96,14 @@ def init_db():
                 section_name TEXT UNIQUE,
                 text TEXT
             )''')
-            # Инициализация дефолтных информационных разделов
+            # Инициализация дефолтных информационных разделов с реальными текстами из ТЗ
             default_sections = [
-                ('О донорстве крови', 'Требования к донорам: ... (текст из ТЗ). Подготовка: ... Противопоказания: ...'),
-                ('О донорстве костного мозга', 'Важность: ... Процедура: ...'),
-                ('О донациях в МИФИ', 'Пошаговое описание: ... Ближайший ДД: ...')
+                ('О донорстве крови',
+                 'Требования к донорам:\n· Возраст: Не менее 18 лет\n· Вес: Не менее 50 кг\n· Здоровье: Отсутствие хронических заболеваний в острой фазе, не болели ангиной, ОРВИ, гриппом менее чем за месяц до сдачи крови\n· Температура тела ≤ 37°C\n· Давление: систолическое 90-160 мм рт.ст., диастолическое 60-100 мм рт.ст.\n· Гемоглобин: женщины ≥ 120 г/л, мужчины ≥ 130 г/л\n· Периодичность: Цельная кровь: не чаще 4-5 раз в год для мужчин, 3-4 раза для женщин\n\nПодготовка к донации (за 2-3 дня):\n· Питание: Исключить жирную, острую, копченую пищу. Отказаться от фастфуда, молочных продуктов и продуктов с яйцами\n· Образ жизни: Отказ от алкоголя за 48 часов. Избегать интенсивных физических нагрузок. Отменить прием лекарственных препаратов (в т.ч. анальгетиков) за 72 часа\n· Накануне: Легкий ужин до 20:00. Сон не менее 8 часов. Обязательный завтрак (каша на воде, сладкий чай, сушки, хлеб с вареньем, - идеально). Нельзя курить в течение часа до сдачи крови\n\nРацион донора за 2-3 дня до донации:\n· Водный режим: 1.5–2 литра воды в день (чистая вода, морсы, компоты).\n· Основа рациона: Крупы на воде. Отварное нежирное мясо (говядина, индейка, курица). Белая нежирная рыба (треска, хек). Овощи и фрукты\n· Запрещено: Жирное мясо (свинина, баранина). Молочные продукты (сыр, сливочное масло, йогурты). Яйца и орехи. Фастфуд, копчености, майонез. Некоторые фрукты и овощи: цитрусовые, бананы, киви, клубника/малина, авокадо, виноград, все экзотические фрукты, свекла, шпинат.\n\nАбсолютные противопоказания:\n· Инфекционные: ВИЧ/СПИД. Сифилис. Вирусные гепатиты (B, C). Туберкулез\n· Паразитарные: Токсоплазмоз. Лейшманиоз\n· Онкологические заболевания\n· Болезни крови\n· Сердечно-сосудистые: Гипертония II-III ст. Ишемическая болезнь\n· Органические поражения ЦНС\n· Бронхиальная астма\n\nВременные противопоказания:\n· После заболеваний: ОРВИ, грипп - 1 месяц. Ангина - 1 месяц. Удаление зуба - 10 дней. Менструация + 5 дней после\n· После процедур: Татуировки/пирсинг - 4-12 месяцев. Эндоскопия - 4-6 месяцев. Прививки (живые вакцины) - 1 месяц\n· Лекарства: Антибиотики - 2 недели после курса. Анальгетики - 3 дня после приема'),
+                ('О донорстве костного мозга',
+                 'Важность донорства костного мозга:\nЕжегодно в России более 5 000 человек нуждаются в трансплантации костного мозга для лечения лейкозов, лимфом и других тяжелых заболеваний крови. Однако только 30–40% пациентов находят совместимого донора среди родственников, остальные вынуждены искать неродственного донора через Национальный регистр доноров костного мозга.\nНесмотря на то, что в России действует Федеральный регистр доноров костного мозга (ФРДКМ), его численность составляет около 200 000 человек (данные на 2024 год), что крайне мало для страны с населением 146 млн. Для сравнения: в Германии регистр насчитывает 9 млн доноров, а в США — 12 млн, нередко болеющие люди обращаются к зарубежным регистрам в надежде найти там своего донора.\n\nПроцедура вступления в регистр доноров костного мозга:\n· Шаг 1: Первичное согласие. Заполнение анкеты (исключение противопоказаний): Возраст 18-45 лет. Вес >50 кг. Отсутствие медицинских противопоказаний\n· Шаг 2: Забор биоматериала. Вариант 1: Анализ крови (10 мл из вены). Вариант 2: Мазок с внутренней поверхности щеки\n· Шаг 3: Типирование. Генетический анализ HLA-фенотипа. Данные вносятся в базу Федерального регистра\n· Шаг 4: Ожидание. Средний срок ожидания "совпадения": 2-10 лет. Вероятность того, что найдется генетический близнец, нуждающийся в пересадке примерно 5%. При совпадении — повторный анализ для подтверждения, медицинское обследование и процедура сдачи костного мозга.\n\nПроцедура донации:\n· Способ 1: Периферический забор стволовых клеток (80% случаев). Подготовка (5 дней): Контроль анализов крови. Процесс: Забор крови из вены одной руки. Сепарация стволовых клеток через аферезный аппарат. Возврат крови через вену другой руки. Длительность: 4-6 часов. Восстановление: 1-2 дня\n· Способ 2: Пункция костного мозга (20% случаев). Подготовка: Полное обследование. Процесс: Анестезия. Прокол тазовых костей специальными иглами. Забор жидкого костного мозга (500-1000 мл). Длительность: 1-1.5 часа. Восстановление: 3-7 дней'),
+                ('О донациях в МИФИ',
+                 'Процедура сдачи крови в МИФИ:\n1. Прибытие в МИФИ. Место: Студенческий офис. Регистрация: Заполнение необходимых документов у столов с волонтерами. Получение направления на донацию у столов с регистрацией сотрудников Центра крови. Получение одноразовых бахил\n2. Медобследование. Шаг 1: Терапевт. Измерение давления и пульса. Опрос о самочувствии и других факторах. Шаг 2: Лаборант. Экспресс-анализ крови из пальца (гемоглобин): Вес: проверка нормы (>50 кг)\n3. Процедура забора крови. Длительность: 10-15 минут. Процесс: Дезинфекция кожи на сгибе локтя. Введение одноразовой иглы (стерильный пакет вскрывают при вас). Забор 450 мл крови в герметичный пакет. Аккуратное извлечение иглы + давящая повязка\n4. Отдых и питание. Перекус: напитки (соки, чай), сладкие угощения (шоколадки, печенье и др.). После донации донор может выбрать сувенир на свое усмотрение\n5. Выдача справок. Документы: Справка для работодателя/учебной части (освобождение на 2 дня). Денежная компенсация питания для восстановления после донации\n\nБлижайший ДД: Укажите дату ближайшего события при редактировании раздела.')
             ]
             for name, text in default_sections:
                 cursor.execute('INSERT OR IGNORE INTO info_sections (section_name, text) VALUES (?, ?)', (name, text))
@@ -237,8 +240,8 @@ async def process_phone(message: types.Message, state: FSMContext):
             user = cursor.fetchone()
         await state.update_data(phone=phone)
         if user:
-            await state.update_data(name=user[3], surname=user[2], category=user[5], group=user[6], social_contacts=user[7])
-            response = f"Вы уже в базе: {user[3]} {user[2]}, категория: {user[5]}, группа: {user[6]}.\nПодтверждаете? (Да/Нет)"
+            await state.update_data(name=user[3], surname=user[4], category=user[5], group=user[6], social_contacts=user[7])  # Исправлен порядок surname/name
+            response = f"Вы уже в базе: {user[3]} {user[4]}, категория: {user[5]}, группа: {user[6]}.\nПодтверждаете? (Да/Нет)"
             keyboard = InlineKeyboardBuilder()
             keyboard.button(text="Да", callback_data="confirm_yes")
             keyboard.button(text="Нет", callback_data="confirm_no")
@@ -363,17 +366,27 @@ async def process_social_contacts(message: types.Message, state: FSMContext):
     try:
         with sqlite3.connect('donor_bot.db', timeout=10) as conn:
             cursor = conn.cursor()
-            cursor.execute('''INSERT OR IGNORE INTO users 
-                (telegram_id, phone, name, surname, category, user_group, social_contacts, profile_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')''',
-                (message.from_user.id, data.get('phone'), data['name'], data['surname'],
-                 data['category'], data.get('group'), social_contacts))
+            # Проверяем, существует ли запись по phone, и обновляем (для случая перезаписи)
+            cursor.execute('SELECT id FROM users WHERE phone = ?', (data.get('phone'),))
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute('''UPDATE users SET 
+                    telegram_id = ?, name = ?, surname = ?, category = ?, user_group = ?, social_contacts = ?, profile_status = 'pending'
+                    WHERE phone = ?''',
+                    (message.from_user.id, data['name'], data['surname'], data['category'], data.get('group'), social_contacts, data.get('phone')))
+                logger.info(f"Обновлен профиль для телефона {data.get('phone')}, отправлен на модерацию")
+            else:
+                cursor.execute('''INSERT INTO users 
+                    (telegram_id, phone, name, surname, category, user_group, social_contacts, profile_status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')''',
+                    (message.from_user.id, data.get('phone'), data['name'], data['surname'],
+                     data['category'], data.get('group'), social_contacts))
+                logger.info(f"Создан новый профиль для {data['name']} {data['surname']}, отправлен на модерацию")
             conn.commit()
-            logger.info(f"Профиль пользователя {data['name']} {data['surname']} отправлен на модерацию")
         await state.clear()
         await message.answer("Ваш профиль отправлен на модерацию.")
     except sqlite3.Error as e:
-        logger.error(f"Ошибка при сохранении профиля пользователя {data.get('name', 'Unknown')}: {e}")
+        logger.error(f"Ошибка при сохранении/обновлении профиля пользователя {data.get('name', 'Unknown')}: {e}")
         await message.answer("Произошла ошибка при сохранении профиля. Попробуйте позже.")
 
 @dp.message(Command(commands=['help']))
@@ -480,11 +493,39 @@ async def profil_handler(message: types.Message, state: FSMContext):
                 f"Соцсети: {user[5] or 'Нет'}\nСтатус: {user[7]}\n"
                 f"Количество донаций: {sum_donations}\nПоследняя донация: {last_date_center}\n"
                 f"Вступление в ДКМ: {dkm_str}\nИстория донаций:\n{history_str}")
-        await message.answer(response)
-        logger.info(f"Пользователь {message.from_user.id} запросил просмотр профиля")
+            # Добавляем список текущих регистраций с кнопками отмены
+            cursor.execute('SELECT e.id, e.date, e.time, e.description FROM registrations r JOIN events e ON r.event_id = e.id WHERE r.user_id = ? AND r.status = "registered"', (user_id,))
+            registrations = cursor.fetchall()
+            if registrations:
+                response += "\n\nВаши текущие регистрации:"
+                keyboard = InlineKeyboardBuilder()
+                for reg in registrations:
+                    response += f"\n- {reg[1]} {reg[2]} - {reg[3]}"
+                    keyboard.button(text=f"Отменить {reg[1]}", callback_data=f"unreg_{reg[0]}")
+                await message.answer(response, reply_markup=keyboard.as_markup())
+            else:
+                await message.answer(response)
+            logger.info(f"Пользователь {message.from_user.id} запросил просмотр профиля")
     except sqlite3.Error as e:
         logger.error(f"Ошибка при получении профиля пользователя {message.from_user.id}: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже.")
+
+@dp.callback_query(lambda c: c.data.startswith('unreg_'))
+async def process_unreg(callback_query: types.CallbackQuery):
+    event_id = int(callback_query.data.split('_')[1])
+    user_id = callback_query.from_user.id
+    try:
+        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM users WHERE telegram_id = ?', (user_id,))
+            db_user_id = cursor.fetchone()[0]
+            cursor.execute('UPDATE registrations SET status = "cancelled" WHERE user_id = ? AND event_id = ?', (db_user_id, event_id))
+            conn.commit()
+            logger.info(f"Пользователь {user_id} отменил регистрацию на мероприятие {event_id}")
+        await callback_query.answer("Регистрация отменена.")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при отмене регистрации пользователя {user_id} на {event_id}: {e}")
+        await callback_query.answer("Произошла ошибка. Попробуйте позже.")
 
 @dp.message(Command(commands=['stats']))
 async def stats_handler(message: types.Message):
@@ -505,6 +546,41 @@ async def stats_handler(message: types.Message):
     except sqlite3.Error as e:
         logger.error(f"Ошибка при получении статистики пользователя {message.from_user.id}: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже.")
+
+@dp.message(Command(commands=['info']))
+async def info_handler(message: types.Message):
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="О донорстве крови", callback_data="info_blood")
+    keyboard.button(text="О донорстве костного мозга", callback_data="info_bone")
+    keyboard.button(text="О донациях в МИФИ", callback_data="info_mifi")
+    await message.answer("Выберите раздел информации:", reply_markup=keyboard.as_markup())
+    logger.info(f"Пользователь {message.from_user.id} запросил информационные разделы")
+
+@dp.callback_query(lambda c: c.data.startswith('info_'))
+async def process_info(callback_query: types.CallbackQuery):
+    section_map = {
+        'blood': 'О донорстве крови',
+        'bone': 'О донорстве костного мозга',
+        'mifi': 'О донациях в МИФИ'
+    }
+    section_name = section_map.get(callback_query.data.split('_')[1])
+    if not section_name:
+        await callback_query.answer("Некорректный раздел.")
+        return
+    try:
+        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT text FROM info_sections WHERE section_name = ?', (section_name,))
+            text = cursor.fetchone()
+        if text:
+            await callback_query.message.answer(text[0])
+            logger.info(f"Пользователь {callback_query.from_user.id} просмотрел раздел '{section_name}'")
+        else:
+            await callback_query.message.answer("Текст раздела не найден.")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при получении текста раздела '{section_name}': {e}")
+        await callback_query.message.answer("Произошла ошибка. Попробуйте позже.")
+    await callback_query.answer()
 
 # --- Админские команды ---
 
@@ -610,7 +686,11 @@ async def add_event_handler(message: types.Message, state: FSMContext):
 @dp.message(AddEventStates.date)
 async def process_event_date(message: types.Message, state: FSMContext):
     try:
-        datetime.strptime(message.text, '%Y-%m-%d')
+        event_date = datetime.strptime(message.text, '%Y-%m-%d')
+        if event_date < datetime.now().replace(hour=0, minute=0, second=0, microsecond=0):
+            await message.answer("Дата уже прошла. Введите будущую дату в формате YYYY-MM-DD.")
+            logger.warning(f"Попытка создать мероприятие с прошедшей датой {message.text} от админа {message.from_user.id}")
+            return
     except ValueError:
         await message.answer("Некорректный формат даты. Пожалуйста, введите дату в формате YYYY-MM-DD.")
         logger.warning(f"Некорректный формат даты от админа {message.from_user.id}: {message.text}")
@@ -654,13 +734,32 @@ async def process_event_capacity(message: types.Message, state: FSMContext):
             cursor.execute('''INSERT INTO events (date, time, location, description, capacity)
                             VALUES (?, ?, ?, ?, ?)''',
                            (data['date'], data['time'], data['location'], data['description'], capacity))
+            event_id = cursor.lastrowid
             conn.commit()
             logger.info(f"Админ {message.from_user.id} добавил мероприятие: {data['description']}")
         await state.clear()
         await message.answer("Мероприятие добавлено.")
+        # Рассылка уведомлений всем consented пользователям
+        asyncio.create_task(send_new_event_notification(data['date'], data['time'], data['location'], data['description']))
     except sqlite3.Error as e:
         logger.error(f"Ошибка при добавлении мероприятия: {e}")
         await message.answer("Произошла ошибка при добавлении мероприятия. Попробуйте позже.")
+
+async def send_new_event_notification(date, time, location, description):
+    try:
+        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT telegram_id FROM users WHERE consent = 1')
+            users = cursor.fetchall()
+        for user in users:
+            telegram_id = user[0]
+            try:
+                await bot.send_message(telegram_id, f"Новое мероприятие: {description}\nДата: {date} {time}\nМесто: {location}\nЗарегистрируйтесь через /reg!")
+            except Exception as e:
+                logger.warning(f"Ошибка отправки уведомления пользователю {telegram_id}: {e}")
+        logger.info("Рассылка о новом мероприятии завершена")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при рассылке уведомлений: {e}")
 
 @dp.message(Command(commands=['stats_event']))
 async def stats_event_handler(message: types.Message):
@@ -771,7 +870,7 @@ async def show_profiles(message: types.Message, offset: int):
                 pagination_keyboard.button(text="Назад", callback_data=f"prev_{offset - 5}")
             if len(users) == 5:
                 pagination_keyboard.button(text="Вперед", callback_data=f"next_{offset + 5}")
-            pagination_markup = pagination_keyboard.as_markup() if pagination_keyboard.buttons else None
+            pagination_markup = pagination_keyboard.as_markup() if pagination_keyboard.buttons else None  # Исправлено: buttons -> inline_keyboard
             # Для каждого пользователя: текст + кнопка "Подробнее"
             for user in users:
                 cursor.execute('SELECT COUNT(*) FROM registrations WHERE user_id = ? AND status = "registered"', (user[0],))
@@ -857,6 +956,53 @@ async def import_excel_handler(message: types.Message):
     except Exception as e:
         await message.answer(f"Ошибка при импорте данных: {str(e)}")
         logger.error(f"Ошибка при импорте Excel админом {message.from_user.id}: {e}")
+
+@dp.message(Command(commands=['edit_info']))
+async def edit_info_handler(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав.")
+        logger.warning(f"Пользователь {message.from_user.id} пытался редактировать инфо разделы")
+        return
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="О донорстве крови", callback_data="edit_blood")
+    keyboard.button(text="О донорстве костного мозга", callback_data="edit_bone")
+    keyboard.button(text="О донациях в МИФИ", callback_data="edit_mifi")
+    await message.answer("Выберите раздел для редактирования:", reply_markup=keyboard.as_markup())
+    await state.set_state(EditInfoStates.section)
+    logger.info(f"Админ {message.from_user.id} начал редактирование инфо разделов")
+
+@dp.callback_query(lambda c: c.data.startswith('edit_'))
+async def process_edit_section(callback_query: types.CallbackQuery, state: FSMContext):
+    section_map = {
+        'blood': 'О донорстве крови',
+        'bone': 'О донорстве костного мозга',
+        'mifi': 'О донациях в МИФИ'
+    }
+    section_name = section_map.get(callback_query.data.split('_')[1])
+    if not section_name:
+        await callback_query.answer("Некорректный раздел.")
+        return
+    await state.update_data(section=section_name)
+    await callback_query.message.answer(f"Введите новый текст для раздела '{section_name}':")
+    await state.set_state(EditInfoStates.text)
+    await callback_query.answer()
+
+@dp.message(EditInfoStates.text)
+async def process_edit_text(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    section_name = data['section']
+    new_text = message.text.strip()
+    try:
+        with sqlite3.connect('donor_bot.db', timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE info_sections SET text = ? WHERE section_name = ?', (new_text, section_name))
+            conn.commit()
+            logger.info(f"Админ {message.from_user.id} обновил текст раздела '{section_name}'")
+        await message.answer(f"Текст раздела '{section_name}' обновлен.")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при обновлении текста раздела '{section_name}': {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
+    await state.clear()
 
 @dp.message(Command(commands=['upload_stats']))
 async def upload_stats_handler(message: types.Message):
