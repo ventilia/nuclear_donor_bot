@@ -391,7 +391,7 @@ async def admin_help_handler(message: types.Message):
                          "/upload_stats - Загрузить статистику пользователей из Excel\n"
                          "/export_stats - Выгрузить статистику пользователей в Excel\n"
                          "/answer - Ответить на вопросы пользователей\n"
-                         "/broadcast - Рассылка сообщений \n"
+                         
                          "/add_admin - Добавить админа\n"
                          "/backup_users - Бэкап пользователей\n"
                          "/restore_users - Восстановление пользователей из бэкапа\n"
