@@ -1,4 +1,3 @@
-# user_handlers.py
 import re
 from datetime import datetime, timedelta
 from aiogram import types, Router
@@ -12,7 +11,7 @@ from src.database.db import get_donations_count_by_center, get_last_donation, ge
 from src.database.db import get_user_id_by_telegram_id, get_event_capacity, get_registrations_count as get_event_reg_count
 from src.database.db import get_event_date, add_registration, add_reminder, cancel_registration
 from src.database.db import add_non_attendance_reason, save_or_update_user, get_user_by_phone, get_consent_by_phone
-from src.database.db import update_consent_by_phone, add_question, logger
+from src.database.db import update_consent_by_phone, add_question, logger, get_user_by_fio, get_connection
 
 user_router = Router()
 
@@ -158,7 +157,7 @@ async def profil_reg_handler(message: types.Message, state: FSMContext):
         keyboard=[[KeyboardButton(text="Назад 🔙")]],
         resize_keyboard=True
     )
-    await message.answer("Введите ваше ФИО (только буквы и пробелы): ✍️", reply_markup=keyboard)
+    await message.answer("Введите ваше ФИО (только буквы и пробелы, минимум фамилия и имя): ✍️", reply_markup=keyboard)
     logger.info(f"Пользователь {message.from_user.id} начал регистрацию профиля")
 
 @user_router.message(ProfilRegStates.fio)
@@ -168,17 +167,63 @@ async def process_fio(message: types.Message, state: FSMContext):
         await message.answer("Регистрация отменена.", reply_markup=types.ReplyKeyboardRemove())
         return
     fio = message.text.strip().title()
-    if not re.match(r'^[А-Яа-яA-Za-z\s]+$', fio):
-        await message.answer("ФИО должно содержать только буквы и пробелы. Попробуйте снова. ⚠️")
+    if not re.match(r'^[А-Яа-яA-Za-z\s]+$', fio) or len(fio.split()) < 2:
+        await message.answer("ФИО должно содержать только буквы и пробелы, минимум два слова (фамилия и имя). Попробуйте снова. ⚠️")
         logger.warning(f"Некорректное ФИО от пользователя {message.from_user.id}: {fio}")
         return
     await state.update_data(fio=fio)
-    await state.set_state(ProfilRegStates.category)
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Студент 🎓", callback_data="cat_student")
-    keyboard.button(text="Сотрудник 👔", callback_data="cat_employee")
-    keyboard.button(text="Внешний донор 🌍", callback_data="cat_external")
-    await message.answer("Выберите категорию: 📂", reply_markup=keyboard.as_markup())
+    # Проверка на существование пользователя с таким ФИО
+    try:
+        existing_user = get_user_by_fio(fio)
+        if existing_user and existing_user[2] is None:  # Если phone None
+            await state.update_data(existing_user_id=existing_user[0])
+            keyboard = InlineKeyboardBuilder()
+            keyboard.button(text="Да ✅", callback_data="previously_used_yes")
+            keyboard.button(text="Нет ❌", callback_data="previously_used_no")
+            await message.answer("Пользовались ли вы ботом ранее? (Мы нашли совпадение по ФИО без номера телефона)", reply_markup=keyboard.as_markup())
+        else:
+            await state.set_state(ProfilRegStates.category)
+            keyboard = InlineKeyboardBuilder()
+            keyboard.button(text="Студент 🎓", callback_data="cat_student")
+            keyboard.button(text="Сотрудник 👔", callback_data="cat_employee")
+            keyboard.button(text="Внешний донор 🌍", callback_data="cat_external")
+            await message.answer("Выберите категорию: 📂", reply_markup=keyboard.as_markup())
+    except Exception as e:
+        logger.error(f"Ошибка при проверке ФИО {fio}: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
+
+@user_router.callback_query(lambda c: c.data in ['previously_used_yes', 'previously_used_no'])
+async def process_previously_used(callback_query: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    telegram_id = callback_query.from_user.id
+    phone = data.get('phone')
+    fio = data.get('fio')
+    existing_user_id = data.get('existing_user_id')
+    if callback_query.data == 'previously_used_yes':
+        # Обновляем существующего пользователя
+        try:
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''UPDATE users SET 
+                    telegram_id = ?, phone = ?, profile_status = 'pending'
+                    WHERE id = ?''',
+                    (telegram_id, phone, existing_user_id))
+                conn.commit()
+            await callback_query.message.answer("Ваш профиль обновлён и отправлен на модерацию. ⏳")
+            logger.info(f"Обновлён существующий профиль по ФИО {fio} для telegram_id {telegram_id}")
+            await state.clear()
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении профиля по ФИО {fio}: {e}")
+            await callback_query.message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
+    else:
+        # Продолжаем как новый
+        await state.set_state(ProfilRegStates.category)
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="Студент 🎓", callback_data="cat_student")
+        keyboard.button(text="Сотрудник 👔", callback_data="cat_employee")
+        keyboard.button(text="Внешний донор 🌍", callback_data="cat_external")
+        await callback_query.message.answer("Выберите категорию: 📂", reply_markup=keyboard.as_markup())
+    await callback_query.answer()
 
 @user_router.callback_query(lambda c: c.data.startswith('cat_'))
 async def process_category(callback_query: types.CallbackQuery, state: FSMContext):
@@ -204,12 +249,12 @@ async def process_category(callback_query: types.CallbackQuery, state: FSMContex
 @user_router.message(ProfilRegStates.group)
 async def process_group(message: types.Message, state: FSMContext):
     if message.text == "Назад 🔙":
-        await state.set_state(ProfilRegStates.category)
-        keyboard = InlineKeyboardBuilder()
-        keyboard.button(text="Студент 🎓", callback_data="cat_student")
-        keyboard.button(text="Сотрудник 👔", callback_data="cat_employee")
-        keyboard.button(text="Внешний донор 🌍", callback_data="cat_external")
-        await message.answer("Выберите категорию: 📂", reply_markup=keyboard.as_markup())
+        await state.set_state(ProfilRegStates.fio)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Назад 🔙")]],
+            resize_keyboard=True
+        )
+        await message.answer("Введите ваше ФИО (только буквы и пробелы, минимум фамилия и имя): ✍️", reply_markup=keyboard)
         return
     group = message.text.strip().upper()
     if not re.match(r'^[А-Я]\d{2}-\d{3}$', group):
@@ -237,12 +282,12 @@ async def process_social_contacts(message: types.Message, state: FSMContext):
             )
             await message.answer("Введите номер группы (формат: Б21-302): 📚", reply_markup=keyboard)
         else:
-            await state.set_state(ProfilRegStates.category)
-            keyboard = InlineKeyboardBuilder()
-            keyboard.button(text="Студент 🎓", callback_data="cat_student")
-            keyboard.button(text="Сотрудник 👔", callback_data="cat_employee")
-            keyboard.button(text="Внешний донор 🌍", callback_data="cat_external")
-            await message.answer("Выберите категорию: 📂", reply_markup=keyboard.as_markup())
+            await state.set_state(ProfilRegStates.fio)
+            keyboard = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Назад 🔙")]],
+                resize_keyboard=True
+            )
+            await message.answer("Введите ваше ФИО (только буквы и пробелы, минимум фамилия и имя): ✍️", reply_markup=keyboard)
         return
     social_contacts = message.text.strip() if message.text.strip().lower() != 'нет' else None
     data = await state.get_data()
@@ -332,10 +377,10 @@ async def profil_handler(message: types.Message, state: FSMContext):
         last_date_center = f"{last_donation[0]} / {last_donation[1]}" if last_donation else "Нет"
         history = get_donations_history(user_id)
         history_str = "\n".join([f"{d[0]} - {d[1]}" for d in history]) if history else "Нет истории"
-        dkm_str = "Да" if user[5] else "Нет"
+        dkm_str = "Да" if user[6] else "Нет"
         response = (
-            f"Ваш профиль: 📋\nФИО: {user[1]}\nКатегория: {user[2]}\nГруппа: {user[3]}\n"
-            f"Соцсети: {user[4] or 'Нет'} 🔗\nСтатус: {user[6]} ⚙️\n"
+            f"Ваш профиль: 📋\nФИО: {user[3]}\nКатегория: {user[4]}\nГруппа: {user[5]}\n"
+            f"Соцсети: {user[6] or 'Нет'} 🔗\nСтатус: {user[9]} ⚙️\n"
             f"Количество донаций: {sum_donations} 💉\nПоследняя донация: {last_date_center} 📅\n"
             f"Вступление в ДКМ: {dkm_str} 🦴\nИстория донаций:\n{history_str}")
         registrations = get_user_registrations(user_id)

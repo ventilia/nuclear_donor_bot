@@ -1,4 +1,3 @@
-# admin_handlers.py
 import asyncio
 from datetime import datetime
 
@@ -9,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardMarkup, K
 
 from src.states.states import AddEventStates, BroadcastState, AnswerQuestionState, AddAdminState, RestoreState
 from src.database.db import get_admin_stats, get_pending_users, update_profile_status, get_telegram_id_by_user_id, \
-    get_connection, get_user_registrations_count, add_donation, update_dkm, get_user_by_name_surname, \
+    get_connection, get_user_registrations_count, add_donation, update_dkm, get_user_by_fio, \
     get_donations_count_by_center, get_last_donation
 from src.database.db import add_event, get_consented_users_telegram_ids, get_all_events, get_registrations_count
 from src.database.db import get_attended_count, get_event_status, update_event_status, get_user_by_id, get_users_paginated
@@ -709,7 +708,7 @@ async def process_upload_stats(message: types.Message):
             center = 'Гаврилова' if row[2] else 'ФМБА' if row[3] else None
             if not center or not date:
                 continue
-            user = get_user_by_name_surname(fio)
+            user = get_user_by_fio(fio)
             if user:
                 user_id = user[0]
                 add_donation(user_id, date, center)

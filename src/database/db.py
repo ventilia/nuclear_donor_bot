@@ -116,17 +116,15 @@ def import_from_excel():
                             else 'внешний')
                 social_contacts = str(row[7]).strip() if row[7] else None
                 phone = str(row[8]).strip() if row[8] else None
-                if not phone:
-                    logger.warning(f"Пропущена строка для ФИО {fio}: отсутствует номер телефона")
-                    skipped_count += 1
-                    continue
-                cursor.execute('SELECT id FROM users WHERE phone = ?', (phone,))
-                if cursor.fetchone():
-                    logger.warning(f"Пропущена строка для ФИО {fio}: телефон {phone} уже существует")
-                    skipped_count += 1
-                    continue
+                # Убрана проверка if not phone: skip - импортируем всех
+                if phone:  # Если phone есть, проверяем дубликат
+                    cursor.execute('SELECT id FROM users WHERE phone = ?', (phone,))
+                    if cursor.fetchone():
+                        logger.warning(f"Пропущена строка для ФИО {fio}: телефон {phone} уже существует")
+                        skipped_count += 1
+                        continue
                 try:
-                    cursor.execute('''INSERT OR REPLACE INTO users 
+                    cursor.execute('''INSERT INTO users 
                         (phone, fio, category, user_group, social_contacts, profile_status)
                         VALUES (?, ?, ?, ?, ?, 'approved')''',
                         (phone, fio, category, user_group, social_contacts))
@@ -142,9 +140,9 @@ def import_from_excel():
                         cursor.execute('INSERT INTO donations (user_id, date, center) VALUES (?, ?, ?)',
                                        (user_id, last_fmba or 'unknown', 'ФМБА'))
                     imported_count += 1
-                    logger.info(f"Импортирован пользователь: {fio}, телефон: {phone}, категория: {category}, группа: {user_group}")
+                    logger.info(f"Импортирован пользователь: {fio}, телефон: {phone or 'Отсутствует'}, категория: {category}, группа: {user_group}")
                 except sqlite3.Error as e:
-                    logger.error(f"Ошибка при вставке пользователя {fio} (телефон: {phone}): {e}")
+                    logger.error(f"Ошибка при вставке пользователя {fio} (телефон: {phone or 'Отсутствует'}): {e}")
                     skipped_count += 1
             conn.commit()
             logger.info(f"Импорт завершен: импортировано {imported_count} записей, пропущено {skipped_count} записей")
@@ -432,10 +430,10 @@ def update_dkm(user_id, dkm):
         cursor.execute('UPDATE users SET dkm = ? WHERE id = ?', (dkm, user_id))
         conn.commit()
 
-def get_user_by_name_surname(fio):
+def get_user_by_fio(fio):
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT id FROM users WHERE fio = ?', (fio,))
+        cursor.execute('SELECT * FROM users WHERE fio = ?', (fio,))
         return cursor.fetchone()
 
 def add_question(user_id, text):
@@ -466,7 +464,7 @@ def get_user_telegram_id(user_id):
         result = cursor.fetchone()
         return result[0] if result else None
 
-# Функция добавления админа (исправлена для работоспособности, с обработкой исключений)
+# Функция добавления админа
 def add_admin(telegram_id):
     try:
         with get_connection() as conn:
