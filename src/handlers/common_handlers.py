@@ -1,3 +1,4 @@
+# common_handlers.py
 from aiogram import types, Router, Dispatcher
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -14,6 +15,7 @@ async def info_handler(message: types.Message):
     keyboard.button(text="О донорстве крови", callback_data="info_blood")
     keyboard.button(text="О донорстве костного мозга", callback_data="info_bone")
     keyboard.button(text="О донациях в МИФИ", callback_data="info_mifi")
+    keyboard.button(text="Unity DonorSearch", callback_data="info_unity")
     await message.answer("Выберите раздел информации: 📖", reply_markup=keyboard.as_markup())
     logger.info(f"Пользователь {message.from_user.id} запросил информационные разделы")
 
@@ -24,6 +26,11 @@ async def process_info(callback_query: types.CallbackQuery):
         'bone': 'src/info_texts/bone_marrow_donation.txt',
         'mifi': 'src/info_texts/mifi_donations.txt'
     }
+    if callback_query.data == "info_unity":
+        await callback_query.message.answer("Подробная информация о донорстве: https://unity.donorsearch.org/")
+        logger.info(f"Пользователь {callback_query.from_user.id} просмотрел раздел Unity DonorSearch")
+        await callback_query.answer()
+        return
     file_name = section_map.get(callback_query.data.split('_')[1])
     if not file_name:
         await callback_query.answer("Некорректный раздел. ⚠️")

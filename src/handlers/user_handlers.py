@@ -1,3 +1,4 @@
+# user_handlers.py
 import re
 from datetime import datetime, timedelta
 from aiogram import types, Router
@@ -71,8 +72,8 @@ async def process_phone(message: types.Message, state: FSMContext):
         user = get_user_by_phone(phone)
         await state.update_data(phone=phone)
         if user:
-            await state.update_data(name=user[3], surname=user[4], category=user[5], group=user[6], social_contacts=user[7])
-            response = f"Вы уже в базе: {user[3]} {user[4]}, категория: {user[5]}, группа: {user[6]}. Подтверждаете? (Да/Нет) ✅/❌"
+            await state.update_data(fio=user[3], category=user[4], group=user[5], social_contacts=user[6])
+            response = f"Вы уже в базе: {user[3]}, категория: {user[4]}, группа: {user[5]}. Подтверждаете? (Да/Нет) ✅/❌"
             keyboard = InlineKeyboardBuilder()
             keyboard.button(text="Да ✅", callback_data="confirm_yes")
             keyboard.button(text="Нет ❌", callback_data="confirm_no")
@@ -152,49 +153,26 @@ async def process_consent(callback_query: types.CallbackQuery, state: FSMContext
 
 @user_router.message(Command(commands=['profilReg']))
 async def profil_reg_handler(message: types.Message, state: FSMContext):
-    await state.set_state(ProfilRegStates.name)
+    await state.set_state(ProfilRegStates.fio)
     keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Назад 🔙")]],
         resize_keyboard=True
     )
-    await message.answer("Введите ваше имя (только буквы): ✍️", reply_markup=keyboard)
+    await message.answer("Введите ваше ФИО (только буквы и пробелы): ✍️", reply_markup=keyboard)
     logger.info(f"Пользователь {message.from_user.id} начал регистрацию профиля")
 
-@user_router.message(ProfilRegStates.name)
-async def process_name(message: types.Message, state: FSMContext):
+@user_router.message(ProfilRegStates.fio)
+async def process_fio(message: types.Message, state: FSMContext):
     if message.text == "Назад 🔙":
         await state.clear()
         await message.answer("Регистрация отменена.", reply_markup=types.ReplyKeyboardRemove())
         return
-    name = message.text.strip().capitalize()
-    if not re.match(r'^[А-Яа-яA-Za-z\s]+$', name):
-        await message.answer("Имя должно содержать только буквы. Попробуйте снова. ⚠️")
-        logger.warning(f"Некорректное имя от пользователя {message.from_user.id}: {name}")
+    fio = message.text.strip().title()
+    if not re.match(r'^[А-Яа-яA-Za-z\s]+$', fio):
+        await message.answer("ФИО должно содержать только буквы и пробелы. Попробуйте снова. ⚠️")
+        logger.warning(f"Некорректное ФИО от пользователя {message.from_user.id}: {fio}")
         return
-    await state.update_data(name=name)
-    await state.set_state(ProfilRegStates.surname)
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Назад 🔙")]],
-        resize_keyboard=True
-    )
-    await message.answer("Введите вашу фамилию (только буквы): ✍️", reply_markup=keyboard)
-
-@user_router.message(ProfilRegStates.surname)
-async def process_surname(message: types.Message, state: FSMContext):
-    if message.text == "Назад 🔙":
-        await state.set_state(ProfilRegStates.name)
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Назад 🔙")]],
-            resize_keyboard=True
-        )
-        await message.answer("Введите ваше имя (только буквы): ✍️", reply_markup=keyboard)
-        return
-    surname = message.text.strip().capitalize()
-    if not re.match(r'^[А-Яа-яA-Za-z\s]+$', surname):
-        await message.answer("Фамилия должна содержать только буквы. Попробуйте снова. ⚠️")
-        logger.warning(f"Некорректная фамилия от пользователя {message.from_user.id}: {surname}")
-        return
-    await state.update_data(surname=surname)
+    await state.update_data(fio=fio)
     await state.set_state(ProfilRegStates.category)
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Студент 🎓", callback_data="cat_student")
@@ -269,12 +247,12 @@ async def process_social_contacts(message: types.Message, state: FSMContext):
     social_contacts = message.text.strip() if message.text.strip().lower() != 'нет' else None
     data = await state.get_data()
     try:
-        save_or_update_user(message.from_user.id, data.get('phone'), data['name'], data['surname'],
+        save_or_update_user(message.from_user.id, data.get('phone'), data['fio'],
                             data['category'], data.get('group'), social_contacts)
         await state.clear()
         await message.answer("Ваш профиль отправлен на модерацию. ⏳", reply_markup=types.ReplyKeyboardRemove())
     except Exception as e:
-        logger.error(f"Ошибка при сохранении/обновлении профиля пользователя {data.get('name', 'Unknown')}: {e}")
+        logger.error(f"Ошибка при сохранении/обновлении профиля пользователя {data.get('fio', 'Unknown')}: {e}")
         await message.answer("Произошла ошибка при сохранении профиля. Попробуйте позже. ⚠️")
 
 @user_router.message(Command(commands=['help']))
@@ -354,10 +332,10 @@ async def profil_handler(message: types.Message, state: FSMContext):
         last_date_center = f"{last_donation[0]} / {last_donation[1]}" if last_donation else "Нет"
         history = get_donations_history(user_id)
         history_str = "\n".join([f"{d[0]} - {d[1]}" for d in history]) if history else "Нет истории"
-        dkm_str = "Да" if user[6] else "Нет"
+        dkm_str = "Да" if user[5] else "Нет"
         response = (
-            f"Ваш профиль: 📋\nИмя: {user[1]}\nФамилия: {user[2]}\nКатегория: {user[3]}\nГруппа: {user[4]}\n"
-            f"Соцсети: {user[5] or 'Нет'} 🔗\nСтатус: {user[7]} ⚙️\n"
+            f"Ваш профиль: 📋\nФИО: {user[1]}\nКатегория: {user[2]}\nГруппа: {user[3]}\n"
+            f"Соцсети: {user[4] or 'Нет'} 🔗\nСтатус: {user[6]} ⚙️\n"
             f"Количество донаций: {sum_donations} 💉\nПоследняя донация: {last_date_center} 📅\n"
             f"Вступление в ДКМ: {dkm_str} 🦴\nИстория донаций:\n{history_str}")
         registrations = get_user_registrations(user_id)

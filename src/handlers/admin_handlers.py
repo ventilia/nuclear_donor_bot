@@ -1,3 +1,4 @@
+# admin_handlers.py
 import asyncio
 from datetime import datetime
 
@@ -6,19 +7,134 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardMarkup, KeyboardButton
 
-from src.states.states import AddEventStates, BroadcastState, AnswerQuestionState
+from src.states.states import AddEventStates, BroadcastState, AnswerQuestionState, AddAdminState, RestoreState
 from src.database.db import get_admin_stats, get_pending_users, update_profile_status, get_telegram_id_by_user_id, \
     get_connection, get_user_registrations_count, add_donation, update_dkm, get_user_by_name_surname, \
     get_donations_count_by_center, get_last_donation
 from src.database.db import add_event, get_consented_users_telegram_ids, get_all_events, get_registrations_count
 from src.database.db import get_attended_count, get_event_status, update_event_status, get_user_by_id, get_users_paginated
 from src.database.db import delete_user_by_id, get_all_users_for_export, add_question, get_unanswered_questions
-from src.database.db import mark_question_answered, get_user_telegram_id, import_from_excel
+from src.database.db import mark_question_answered, get_user_telegram_id, import_from_excel, export_users_to_excel, import_users_from_excel
 from src.utils.keyboards import is_admin
-from src.database.db import logger
+from src.database.db import logger, add_admin
 import openpyxl
 
 admin_router = Router()
+
+@admin_router.message(Command(commands=['add_admin']))
+async def add_admin_handler(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав. ⚠️")
+        return
+    await state.set_state(AddAdminState.telegram_id)
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите Telegram ID нового админа:", reply_markup=keyboard)
+
+@admin_router.message(AddAdminState.telegram_id)
+async def process_add_admin_id(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.clear()
+        await message.answer("Добавление админа отменено.", reply_markup=types.ReplyKeyboardRemove())
+        return
+    try:
+        telegram_id = int(message.text.strip())
+        await state.update_data(telegram_id=telegram_id)
+        await state.set_state(AddAdminState.confirm)
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="Подтвердить ✅", callback_data="add_admin_confirm")
+        keyboard.button(text="Отмена ❌", callback_data="add_admin_cancel")
+        await message.answer(f"Подтвердите добавление админа с ID {telegram_id}?", reply_markup=keyboard.as_markup())
+    except ValueError:
+        await message.answer("Некорректный ID. Введите число. ⚠️")
+
+@admin_router.callback_query(lambda c: c.data in ['add_admin_confirm', 'add_admin_cancel'], AddAdminState.confirm)
+async def confirm_add_admin(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.data == 'add_admin_cancel':
+        await state.clear()
+        await callback_query.message.answer("Добавление отменено.")
+        await callback_query.answer()
+        return
+    data = await state.get_data()
+    telegram_id = data.get('telegram_id')
+    try:
+        add_admin(telegram_id)
+        await callback_query.message.answer(f"Админ с ID {telegram_id} добавлен. ✅")
+        logger.info(f"Админ {callback_query.from_user.id} добавил нового админа {telegram_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении админа {telegram_id}: {e}")
+        await callback_query.message.answer("Произошла ошибка. ⚠️")
+    await state.clear()
+    await callback_query.answer()
+
+@admin_router.message(Command(commands=['backup_users']))
+async def backup_users_handler(message: types.Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав. ⚠️")
+        return
+    try:
+        filename = export_users_to_excel()
+        await message.answer_document(types.FSInputFile(filename), caption="Бэкап таблицы users. 📂")
+        logger.info(f"Админ {message.from_user.id} создал бэкап users")
+    except Exception as e:
+        logger.error(f"Ошибка бэкапа users: {e}")
+        await message.answer("Ошибка при создании бэкапа. ⚠️")
+
+@admin_router.message(Command(commands=['restore_users']))
+async def restore_users_handler(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав. ⚠️")
+        return
+    await state.set_state(RestoreState.file)
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Отправьте файл Excel для восстановления users (опасно: перезапишет данные!): 📂", reply_markup=keyboard)
+
+@admin_router.message(lambda m: m.document and m.document.file_name.endswith('.xlsx'), RestoreState.file)
+async def process_restore_file(message: types.Message, state: FSMContext):
+    # Локальный импорт bot
+    from src.bot import bot
+    if not message.document:
+        await message.answer("Отправьте файл Excel (.xlsx). ⚠️")
+        return
+    try:
+        file_id = message.document.file_id
+        file = await bot.get_file(file_id)
+        file_path = file.file_path
+        temp_filename = "temp_restore.xlsx"
+        await bot.download_file(file_path, temp_filename)
+        await state.update_data(filename=temp_filename)
+        await state.set_state(RestoreState.confirm)
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="Подтвердить ✅", callback_data="restore_confirm")
+        keyboard.button(text="Отмена ❌", callback_data="restore_cancel")
+        await message.answer("Подтвердите восстановление (это перезапишет все данные в users!)?", reply_markup=keyboard.as_markup())
+    except Exception as e:
+        logger.error(f"Ошибка загрузки файла для восстановления: {e}")
+        await message.answer("Ошибка при загрузке файла. ⚠️")
+
+@admin_router.callback_query(lambda c: c.data in ['restore_confirm', 'restore_cancel'], RestoreState.confirm)
+async def confirm_restore(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.data == 'restore_cancel':
+        await state.clear()
+        await callback_query.message.answer("Восстановление отменено.")
+        await callback_query.answer()
+        return
+    data = await state.get_data()
+    filename = data.get('filename')
+    try:
+        import_users_from_excel(filename)
+        await callback_query.message.answer("Восстановление users завершено. ✅")
+        logger.info(f"Админ {callback_query.from_user.id} восстановил users из бэкапа")
+    except Exception as e:
+        logger.error(f"Ошибка восстановления users: {e}")
+        await callback_query.message.answer("Ошибка при восстановлении. ⚠️")
+    await state.clear()
+    await callback_query.answer()
 
 @admin_router.message(Command(commands=['answer']))
 async def answer_handler(message: types.Message, state: FSMContext):
@@ -205,9 +321,9 @@ async def admin_reg_handler(message: types.Message):
             keyboard.button(text="Принять ✅", callback_data=f"approve_{user[0]}")
             keyboard.button(text="Отклонить ❌", callback_data=f"reject_{user[0]}")
             await message.answer(
-                f"Заявка: {user[1]} {user[2]}\nГруппа: {user[3]}\nСоцсети: {user[4]}",
+                f"Заявка: {user[1]}\nГруппа: {user[2]}\nСоцсети: {user[3]}",
                 reply_markup=keyboard.as_markup())
-            logger.info(f"Отображена заявка пользователя {user[1]} {user[2]} для админа {message.from_user.id}")
+            logger.info(f"Отображена заявка пользователя {user[1]} для админа {message.from_user.id}")
     except Exception as e:
         logger.error(f"Ошибка при получении заявок на модерацию: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
@@ -256,6 +372,9 @@ async def admin_help_handler(message: types.Message):
                          "/export_stats - Выгрузить статистику в Excel\n"
                          "/answer - Ответить на вопросы пользователей\n"
                          "/broadcast - Рассылка сообщений всем пользователям\n"
+                         "/add_admin - Добавить админа\n"
+                         "/backup_users - Бэкап пользователей\n"
+                         "/restore_users - Восстановление пользователей из бэкапа\n"
                          "/help - Список пользовательских команд")
     logger.info(f"Админ {message.from_user.id} запросил список админских команд")
 
@@ -458,13 +577,12 @@ async def show_user_detail_by_id(message: types.Message, user_id: int):
                     f"ID: {user[0]}\n"
                     f"Telegram ID: {user[1]}\n"
                     f"Телефон: {user[2]} 📞\n"
-                    f"Имя: {user[3]}\n"
-                    f"Фамилия: {user[4]}\n"
-                    f"Категория: {user[5]}\n"
-                    f"Группа: {user[6]} 📚\n"
-                    f"Соцсети: {user[7]} 🔗\n"
-                    f"DKM: {'Да' if user[8] else 'Нет'} 🦴\n"
-                    f"Статус: {user[10]} ⚙️")
+                    f"ФИО: {user[3]}\n"
+                    f"Категория: {user[4]}\n"
+                    f"Группа: {user[5]} 📚\n"
+                    f"Соцсети: {user[6]} 🔗\n"
+                    f"DKM: {'Да' if user[7] else 'Нет'} 🦴\n"
+                    f"Статус: {user[9]} ⚙️")
         keyboard = InlineKeyboardBuilder()
         keyboard.button(text="Кикнуть ❌", callback_data=f"kick_{user_id}")
         await message.answer(response, reply_markup=keyboard.as_markup())
@@ -488,7 +606,7 @@ async def show_profiles(message: types.Message, offset: int):
         pagination_markup = pagination_keyboard.as_markup() if pagination_keyboard.inline_keyboard else None
         for user in users:
             reg_count = get_user_registrations_count(user[0])
-            text = f"{user[2]} {user[1]}, Группа: {user[3]}, (ID: {user[0]}), Регистраций: {reg_count} 📝"
+            text = f"{user[1]}, Группа: {user[2]}, (ID: {user[0]}), Регистраций: {reg_count} 📝"
             keyboard = InlineKeyboardBuilder()
             keyboard.button(text="Подробнее 🔍", callback_data=f"detail_{user[0]}")
             await message.answer(text, reply_markup=keyboard.as_markup())
@@ -512,13 +630,12 @@ async def show_user_detail(callback_query: types.CallbackQuery):
                     f"ID: {user[0]}\n"
                     f"Telegram ID: {user[1]}\n"
                     f"Телефон: {user[2]} 📞\n"
-                    f"Имя: {user[3]}\n"
-                    f"Фамилия: {user[4]}\n"
-                    f"Категория: {user[5]}\n"
-                    f"Группа: {user[6]} 📚\n"
-                    f"Соцсети: {user[7]} 🔗\n"
-                    f"DKM: {'Да' if user[8] else 'Нет'} 🦴\n"
-                    f"Статус: {user[10]} ⚙️")
+                    f"ФИО: {user[3]}\n"
+                    f"Категория: {user[4]}\n"
+                    f"Группа: {user[5]} 📚\n"
+                    f"Соцсети: {user[6]} 🔗\n"
+                    f"DKM: {'Да' if user[7] else 'Нет'} 🦴\n"
+                    f"Статус: {user[9]} ⚙️")
         keyboard = InlineKeyboardBuilder()
         keyboard.button(text="Кикнуть ❌", callback_data=f"kick_{user_id}")
         await callback_query.message.answer(response, reply_markup=keyboard.as_markup())
@@ -588,14 +705,11 @@ async def process_upload_stats(message: types.Message):
         sheet = wb.active
         for row in sheet.iter_rows(min_row=2, values_only=True):
             fio = str(row[0]).strip()
-            parts = fio.split(maxsplit=1)
-            surname = parts[0]
-            name = parts[1] if len(parts) > 1 else ''
             date = str(row[5]) if row[5] else None
             center = 'Гаврилова' if row[2] else 'ФМБА' if row[3] else None
             if not center or not date:
                 continue
-            user = get_user_by_name_surname(name, surname)
+            user = get_user_by_name_surname(fio)
             if user:
                 user_id = user[0]
                 add_donation(user_id, date, center)
@@ -621,8 +735,8 @@ async def export_stats_handler(message: types.Message):
         users = get_all_users_for_export()
         for user in users:
             user_id = user[0]
-            fio = f"{user[4]} {user[3]}"
-            group = user[6]
+            fio = user[3]
+            group = user[5]
             phone = user[2]
             count_g = get_donations_count_by_center(user_id, "Гаврилова")
             count_f = get_donations_count_by_center(user_id, "ФМБА")

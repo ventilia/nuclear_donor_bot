@@ -2,8 +2,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class ProfilRegStates(StatesGroup):
     phone_confirm = State()
-    name = State()
-    surname = State()
+    fio = State()  # Объединённое поле для ФИО
     category = State()
     group = State()
     social_contacts = State()
@@ -35,4 +34,12 @@ class CancelReasonState(StatesGroup):
 class BroadcastState(StatesGroup):
     text = State()
     photo = State()
+    confirm = State()
+
+class AddAdminState(StatesGroup):  # Новое состояние для добавления админа
+    telegram_id = State()
+    confirm = State()
+
+class RestoreState(StatesGroup):  # Новое состояние для восстановления бекапа
+    file = State()
     confirm = State()

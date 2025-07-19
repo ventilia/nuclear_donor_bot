@@ -4,8 +4,6 @@ import logging
 import re
 from datetime import datetime
 
-from src.config import ADMINS  # Не используется здесь, но для полноты
-
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
@@ -16,12 +14,12 @@ def init_db():
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
+            # Таблица users: fio вместо name и surname
             cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 telegram_id INTEGER UNIQUE,
                 phone TEXT UNIQUE,
-                name TEXT,
-                surname TEXT,
+                fio TEXT,
                 category TEXT,
                 user_group TEXT,
                 social_contacts TEXT,
@@ -76,6 +74,17 @@ def init_db():
                 timestamp TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )''')
+            # Таблица для админов
+            cursor.execute('''CREATE TABLE IF NOT EXISTS admins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER UNIQUE
+            )''')
+            # Начальное заполнение админов, если таблица пуста
+            cursor.execute('SELECT COUNT(*) FROM admins')
+            if cursor.fetchone()[0] == 0:
+                initial_admins = [123456789, 1653833795, 1191457973]
+                for admin_id in initial_admins:
+                    cursor.execute('INSERT OR IGNORE INTO admins (telegram_id) VALUES (?)', (admin_id,))
             conn.commit()
             logger.info("База данных успешно инициализирована")
     except sqlite3.Error as e:
@@ -101,9 +110,6 @@ def import_from_excel():
                     logger.warning(f"Пропущена строка {row}: пустое ФИО")
                     skipped_count += 1
                     continue
-                parts = fio.split(maxsplit=1)
-                surname = parts[0] if parts else ''
-                name = parts[1] if len(parts) > 1 else ''
                 user_group = str(row[1]).strip() if row[1] else ''
                 category = ('сотрудник' if 'сотрудник' in user_group.lower() or 'инженер' in user_group.lower()
                             else 'студент' if re.match(r'^[А-Я]\d{2}-\d{3}$', user_group)
@@ -121,9 +127,9 @@ def import_from_excel():
                     continue
                 try:
                     cursor.execute('''INSERT OR REPLACE INTO users 
-                        (phone, name, surname, category, user_group, social_contacts, profile_status)
-                        VALUES (?, ?, ?, ?, ?, ?, 'approved')''',
-                        (phone, name, surname, category, user_group, social_contacts))
+                        (phone, fio, category, user_group, social_contacts, profile_status)
+                        VALUES (?, ?, ?, ?, ?, 'approved')''',
+                        (phone, fio, category, user_group, social_contacts))
                     user_id = cursor.lastrowid
                     count_gavrilov = int(row[2]) if row[2] else 0
                     count_fmba = int(row[3]) if row[3] else 0
@@ -136,9 +142,9 @@ def import_from_excel():
                         cursor.execute('INSERT INTO donations (user_id, date, center) VALUES (?, ?, ?)',
                                        (user_id, last_fmba or 'unknown', 'ФМБА'))
                     imported_count += 1
-                    logger.info(f"Импортирован пользователь: {name} {surname}, телефон: {phone}, категория: {category}, группа: {user_group}")
+                    logger.info(f"Импортирован пользователь: {fio}, телефон: {phone}, категория: {category}, группа: {user_group}")
                 except sqlite3.Error as e:
-                    logger.error(f"Ошибка при вставке пользователя {name} {surname} (телефон: {phone}): {e}")
+                    logger.error(f"Ошибка при вставке пользователя {fio} (телефон: {phone}): {e}")
                     skipped_count += 1
             conn.commit()
             logger.info(f"Импорт завершен: импортировано {imported_count} записей, пропущено {skipped_count} записей")
@@ -149,7 +155,6 @@ def import_from_excel():
         logger.error(f"Ошибка импорта Excel: {e}")
         raise
 
-# Остальные функции БД аналогичны оригиналу, но с logger на русском комментариях
 def get_user_by_phone(phone):
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -169,23 +174,23 @@ def update_consent_by_phone(phone, consent):
         cursor.execute('UPDATE users SET consent = ? WHERE phone = ?', (consent, phone))
         conn.commit()
 
-def save_or_update_user(telegram_id, phone, name, surname, category, user_group, social_contacts):
+def save_or_update_user(telegram_id, phone, fio, category, user_group, social_contacts):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT id FROM users WHERE phone = ?', (phone,))
         existing = cursor.fetchone()
         if existing:
             cursor.execute('''UPDATE users SET 
-                telegram_id = ?, name = ?, surname = ?, category = ?, user_group = ?, social_contacts = ?, profile_status = 'pending'
+                telegram_id = ?, fio = ?, category = ?, user_group = ?, social_contacts = ?, profile_status = 'pending'
                 WHERE phone = ?''',
-                (telegram_id, name, surname, category, user_group, social_contacts, phone))
+                (telegram_id, fio, category, user_group, social_contacts, phone))
             logger.info(f"Обновлен профиль для телефона {phone}, отправлен на модерацию")
         else:
             cursor.execute('''INSERT INTO users 
-                (telegram_id, phone, name, surname, category, user_group, social_contacts, profile_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')''',
-                (telegram_id, phone, name, surname, category, user_group, social_contacts))
-            logger.info(f"Создан новый профиль для {name} {surname}, отправлен на модерацию")
+                (telegram_id, phone, fio, category, user_group, social_contacts, profile_status)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending')''',
+                (telegram_id, phone, fio, category, user_group, social_contacts))
+            logger.info(f"Создан новый профиль для {fio}, отправлен на модерацию")
         conn.commit()
 
 def get_profile_status_by_telegram_id(telegram_id):
@@ -205,7 +210,7 @@ def get_user_by_telegram_id(telegram_id):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            'SELECT id, name, surname, category, user_group, social_contacts, dkm, profile_status FROM users WHERE telegram_id = ?',
+            'SELECT id, fio, category, user_group, social_contacts, dkm, profile_status FROM users WHERE telegram_id = ?',
             (telegram_id,))
         return cursor.fetchone()
 
@@ -253,7 +258,7 @@ def get_admin_stats():
 def get_pending_users():
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT id, name, surname, user_group, social_contacts FROM users WHERE profile_status = "pending"')
+        cursor.execute('SELECT id, fio, user_group, social_contacts FROM users WHERE profile_status = "pending"')
         return cursor.fetchall()
 
 def update_profile_status(user_id, status):
@@ -323,7 +328,7 @@ def get_user_by_id(user_id):
 def get_users_paginated(limit, offset):
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT id, name, surname, user_group FROM users LIMIT ? OFFSET ?', (limit, offset))
+        cursor.execute('SELECT id, fio, user_group FROM users LIMIT ? OFFSET ?', (limit, offset))
         return cursor.fetchall()
 
 def delete_user_by_id(user_id):
@@ -427,10 +432,10 @@ def update_dkm(user_id, dkm):
         cursor.execute('UPDATE users SET dkm = ? WHERE id = ?', (dkm, user_id))
         conn.commit()
 
-def get_user_by_name_surname(name, surname):
+def get_user_by_name_surname(fio):
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT id FROM users WHERE name = ? AND surname = ?', (name, surname))
+        cursor.execute('SELECT id FROM users WHERE fio = ?', (fio,))
         return cursor.fetchone()
 
 def add_question(user_id, text):
@@ -460,3 +465,55 @@ def get_user_telegram_id(user_id):
         cursor.execute('SELECT telegram_id FROM users WHERE id = ?', (user_id,))
         result = cursor.fetchone()
         return result[0] if result else None
+
+# Функция добавления админа (исправлена для работоспособности, с обработкой исключений)
+def add_admin(telegram_id):
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('INSERT OR IGNORE INTO admins (telegram_id) VALUES (?)', (telegram_id,))
+            conn.commit()
+        logger.info(f"Добавлен админ с telegram_id {telegram_id}")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при добавлении админа {telegram_id}: {e}")
+        raise
+
+# Функции для бэкапа и восстановления пользователей
+def export_users_to_excel(filename='users_backup.xlsx'):
+    try:
+        wb = openpyxl.Workbook()
+        sheet = wb.active
+        sheet.append(['id', 'telegram_id', 'phone', 'fio', 'category', 'user_group', 'social_contacts', 'dkm', 'consent', 'profile_status'])
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM users')
+            users = cursor.fetchall()
+            for user in users:
+                sheet.append(user)
+        wb.save(filename)
+        logger.info(f"Экспорт пользователей сохранен в {filename}")
+        return filename
+    except Exception as e:
+        logger.error(f"Ошибка экспорта пользователей: {e}")
+        raise
+
+def import_users_from_excel(filename):
+    try:
+        wb = openpyxl.load_workbook(filename)
+        sheet = wb.active
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM users')  # Очистка таблицы перед импортом (опасная операция)
+            imported = 0
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                if len(row) < 10:
+                    continue
+                cursor.execute('''INSERT OR REPLACE INTO users 
+                    (id, telegram_id, phone, fio, category, user_group, social_contacts, dkm, consent, profile_status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', row)
+                imported += 1
+            conn.commit()
+            logger.info(f"Восстановлено {imported} пользователей из {filename}")
+    except Exception as e:
+        logger.error(f"Ошибка импорта пользователей из {filename}: {e}")
+        raise
