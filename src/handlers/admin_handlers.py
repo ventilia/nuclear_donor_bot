@@ -97,7 +97,6 @@ async def restore_users_handler(message: types.Message, state: FSMContext):
 
 @admin_router.message(lambda m: m.document and m.document.file_name.endswith('.xlsx'), RestoreState.file)
 async def process_restore_file(message: types.Message, state: FSMContext):
-    # Локальный импорт bot
     from src.bot import bot
     if not message.document:
         await message.answer("Отправьте файл Excel (.xlsx). ⚠️")
@@ -171,7 +170,6 @@ async def select_question(callback_query: types.CallbackQuery, state: FSMContext
 
 @admin_router.message(AnswerQuestionState.response)
 async def process_answer_text(message: types.Message, state: FSMContext):
-    # Локальный импорт bot внутри функции для избежания циклического импорта
     from src.bot import bot
     if message.text == "Назад 🔙":
         await state.set_state(AnswerQuestionState.select)
@@ -206,7 +204,6 @@ async def broadcast_handler(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         await message.answer("Нет прав. ⚠️")
         return
-    # Добавляем выбор фильтра перед текстом
     await state.set_state(BroadcastState.filter)
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Всем пользователям", callback_data="broadcast_filter_all")
@@ -249,7 +246,6 @@ async def process_broadcast_text(message: types.Message, state: FSMContext):
 
 @admin_router.message(BroadcastState.photo)
 async def process_broadcast_photo(message: types.Message, state: FSMContext):
-    # Локальный импорт bot внутри функции для избежания циклического импорта
     from src.bot import bot
     if message.text == "Назад 🔙":
         await state.set_state(BroadcastState.text)
@@ -275,7 +271,6 @@ async def process_broadcast_photo(message: types.Message, state: FSMContext):
 
 @admin_router.callback_query(lambda c: c.data in ['broadcast_confirm', 'broadcast_cancel'], BroadcastState.confirm)
 async def confirm_broadcast(callback_query: types.CallbackQuery, state: FSMContext):
-    # Локальный импорт bot внутри функции для избежания циклического импорта
     from src.bot import bot
     if callback_query.data == 'broadcast_cancel':
         await state.clear()
@@ -288,7 +283,14 @@ async def confirm_broadcast(callback_query: types.CallbackQuery, state: FSMConte
     filter_type = data.get('filter')
     try:
         users = get_users_by_category(filter_type)
+        logger.info(f"Найдено {len(users)} пользователей для рассылки с фильтром {filter_type}")
+        if not users:
+            await callback_query.message.answer("Нет пользователей для рассылки с выбранным фильтром. ⚠️")
+            await state.clear()
+            await callback_query.answer()
+            return
         sent_count = 0
+        failed_count = 0
         for tg_id in users:
             try:
                 if photo:
@@ -296,13 +298,15 @@ async def confirm_broadcast(callback_query: types.CallbackQuery, state: FSMConte
                 else:
                     await bot.send_message(tg_id, text)
                 sent_count += 1
+                await asyncio.sleep(0.05)  # Задержка для соблюдения лимитов Telegram
             except Exception as e:
                 logger.warning(f"Ошибка отправки рассылки пользователю {tg_id}: {e}")
-        await callback_query.message.answer(f"Рассылка завершена. Отправлено {sent_count} пользователям.")
-        logger.info(f"Админ {callback_query.from_user.id} отправил рассылку (фильтр: {filter_type}): {text[:50]}...")
+                failed_count += 1
+        await callback_query.message.answer(f"Рассылка завершена. Отправлено: {sent_count}, не отправлено: {failed_count}.")
+        logger.info(f"Админ {callback_query.from_user.id} отправил рассылку (фильтр: {filter_type}): {text[:50]}... Отправлено: {sent_count}, не отправлено: {failed_count}")
     except Exception as e:
         logger.error(f"Ошибка при рассылке (фильтр: {filter_type}): {e}")
-        await callback_query.message.answer("Произошла ошибка при рассылке.")
+        await callback_query.message.answer("Произошла ошибка при рассылке. ⚠️")
     await state.clear()
     await callback_query.answer()
 
@@ -347,7 +351,6 @@ async def admin_reg_handler(message: types.Message):
 
 @admin_router.callback_query(lambda c: c.data.startswith('approve_') or c.data.startswith('reject_'))
 async def process_profile_action(callback_query: types.CallbackQuery):
-    # Локальный импорт bot внутри функции для избежания циклического импорта
     from src.bot import bot
     action, user_id_str = callback_query.data.split('_')
     user_id = int(user_id_str)
@@ -444,13 +447,19 @@ async def process_event_time(message: types.Message, state: FSMContext):
         )
         await message.answer("Введите дату (YYYY-MM-DD): 📅", reply_markup=keyboard)
         return
+    try:
+        datetime.strptime(message.text, '%H:%M')  # Проверка формата времени
+    except ValueError:
+        await message.answer("Некорректный формат времени. Пожалуйста, введите время в формате HH:MM. ⚠️")
+        logger.warning(f"Некорректный формат времени от админа {message.from_user.id}: {message.text}")
+        return
     await state.update_data(time=message.text)
     await state.set_state(AddEventStates.location)
     keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Назад 🔙")]],
         resize_keyboard=True
     )
-    await message.answer("Введите место: 📍", reply_markup=keyboard)
+    await message.answer("Введите место (например, ЦК ФМБА или ЦК Гаврилова): 📍", reply_markup=keyboard)
 
 @admin_router.message(AddEventStates.location)
 async def process_event_location(message: types.Message, state: FSMContext):
@@ -518,16 +527,21 @@ async def process_event_capacity(message: types.Message, state: FSMContext):
         await message.answer("Произошла ошибка при добавлении мероприятия. Попробуйте позже. ⚠️")
 
 async def send_new_event_notification(date, time, location, description):
-    # Локальный импорт bot внутри функции для избежания циклического импорта
     from src.bot import bot
     try:
         users = get_consented_users_telegram_ids()
+        logger.info(f"Найдено {len(users)} пользователей для уведомления о новом мероприятии")
+        sent_count = 0
+        failed_count = 0
         for telegram_id in users:
             try:
                 await bot.send_message(telegram_id, f"Новое мероприятие: {description} 📅\nДата: {date} {time} ⏰\nМесто: {location} 📍\nЗарегистрируйтесь через /reg! ✅")
+                sent_count += 1
+                await asyncio.sleep(0.05)  # Задержка для соблюдения лимитов Telegram
             except Exception as e:
                 logger.warning(f"Ошибка отправки уведомления пользователю {telegram_id}: {e}")
-        logger.info("Рассылка о новом мероприятии завершена")
+                failed_count += 1
+        logger.info(f"Рассылка о новом мероприятии завершена. Отправлено: {sent_count}, не отправлено: {failed_count}")
     except Exception as e:
         logger.error(f"Ошибка при рассылке уведомлений: {e}")
 
@@ -677,7 +691,6 @@ async def show_user_detail(callback_query: types.CallbackQuery):
 
 @admin_router.callback_query(lambda c: c.data.startswith('kick_'))
 async def kick_user(callback_query: types.CallbackQuery):
-    # Локальный импорт bot внутри функции для избежания циклического импорта
     from src.bot import bot
     user_id = int(callback_query.data.split('_')[1])
     try:
@@ -722,7 +735,6 @@ async def upload_stats_handler(message: types.Message):
 
 @admin_router.message(lambda message: message.document and message.document.file_name.endswith('.xlsx'))
 async def process_upload_stats(message: types.Message):
-    # Локальный импорт bot внутри функции для избежания циклического импорта
     from src.bot import bot
     if not is_admin(message.from_user.id):
         await message.answer("Нет прав. ⚠️")
@@ -755,21 +767,18 @@ async def process_upload_stats(message: types.Message):
             user = get_user_by_fio(fio)
             if user:
                 user_id = user[0]
-                # Обновляем phone, если предоставлен и отсутствует в БД
-                if phone and not user[2]:  # user[2] - phone
+                if phone and not user[2]:
                     with get_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute('UPDATE users SET phone = ? WHERE id = ?', (phone, user_id))
                         conn.commit()
                     logger.info(f"Обновлен телефон {phone} для пользователя {fio}")
-                # Добавляем донации, если count > 0
                 for _ in range(count_gavrilov):
                     add_donation(user_id, last_gavrilov or 'unknown', 'Гаврилова')
                 for _ in range(count_fmba):
                     add_donation(user_id, last_fmba or 'unknown', 'ФМБА')
                 updated_count += 1
             else:
-                # Создаем нового пользователя
                 with get_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute('''INSERT INTO users 
@@ -778,7 +787,6 @@ async def process_upload_stats(message: types.Message):
                                    (phone, fio, category, user_group, social_contacts))
                     user_id = cursor.lastrowid
                     conn.commit()
-                # Добавляем донации
                 for _ in range(count_gavrilov):
                     add_donation(user_id, last_gavrilov or 'unknown', 'Гаврилова')
                 for _ in range(count_fmba):
@@ -805,7 +813,6 @@ async def upload_attendance_handler(message: types.Message, state: FSMContext):
 
 @admin_router.message(AttendanceState.file)
 async def process_upload_attendance(message: types.Message, state: FSMContext):
-    # Локальный импорт bot
     from src.bot import bot
     if message.text == "Назад 🔙":
         await state.clear()
@@ -822,7 +829,7 @@ async def process_upload_attendance(message: types.Message, state: FSMContext):
         wb = openpyxl.load_workbook('temp_attendance.xlsx')
         sheet = wb.active
         date = None
-        attended_fios = {}  # dict fio: center для добавления донации
+        attended_fios = {}
         for row in sheet.iter_rows(min_row=2, values_only=True):
             fio = str(row[0]).strip().title() if row[0] else ''
             row_date = str(row[1]) if len(row) > 1 else None
@@ -834,7 +841,7 @@ async def process_upload_attendance(message: types.Message, state: FSMContext):
             elif row_date != date:
                 await message.answer("Даты в файле отличаются. Используйте файл с одной датой. ⚠️")
                 return
-            attended_fios[fio] = center  # Последний center если дубли fio
+            attended_fios[fio] = center
         if not date:
             await message.answer("Нет данных с датой в файле. ⚠️")
             return
@@ -850,18 +857,16 @@ async def process_upload_attendance(message: types.Message, state: FSMContext):
             user = get_user_by_id(user_id)
             if not user:
                 continue
-            fio_db = user[3]  # Уже .title() в БД
+            fio_db = user[3]
             telegram_id = user[1]
             if telegram_id:
                 if fio_db in attended_fios:
-                    # Пришли: добавить донацию, отметить attended, запрос отзыва
                     center = attended_fios[fio_db]
                     add_donation(user_id, date, center)
                     update_attended(reg_id, 1)
                     await bot.send_message(telegram_id, "Спасибо, что пришли на мероприятие! Просьба написать отзыв. 📝")
                     logger.info(f"Отправлен запрос отзыва пользователю {telegram_id} для события {event_id}")
                 else:
-                    # Не пришли: опрос причины
                     keyboard = InlineKeyboardBuilder()
                     keyboard.button(text="Медотвод ⚕️", callback_data=f"reason_med_{reg_id}")
                     keyboard.button(text="Личные причины 👤", callback_data=f"reason_personal_{reg_id}")
@@ -869,6 +874,7 @@ async def process_upload_attendance(message: types.Message, state: FSMContext):
                     await bot.send_message(telegram_id, "Вы зарегистрировались на прошедшее мероприятие, но не пришли. Укажите причину: ❓", reply_markup=keyboard.as_markup())
                     logger.info(f"Отправлен опрос неявки пользователю {telegram_id} для reg {reg_id}")
                 processed_count += 1
+                await asyncio.sleep(0.05)  # Задержка для соблюдения лимитов Telegram
         await message.answer(f"Посещаемость загружена: обработано {processed_count} регистраций, уведомления отправлены. ✅")
         logger.info(f"Админ {message.from_user.id} загрузил посещаемость из Excel для даты {date}")
         await state.clear()
@@ -878,7 +884,6 @@ async def process_upload_attendance(message: types.Message, state: FSMContext):
 
 @admin_router.message(Command(commands=['export_stats']))
 async def export_stats_handler(message: types.Message):
-    # Локальный импорт bot внутри функции для избежания циклического импорта
     from src.bot import bot
     if not is_admin(message.from_user.id):
         await message.answer("Нет прав. ⚠️")
@@ -896,8 +901,9 @@ async def export_stats_handler(message: types.Message):
             count_g = get_donations_count_by_center(user_id, "Гаврилова")
             count_f = get_donations_count_by_center(user_id, "ФМБА")
             sum_d = count_g + count_f
-            last_g = get_last_donation(user_id)[0] if get_last_donation(user_id) and get_last_donation(user_id)[1] == "Гаврилова" else ''
-            last_f = get_last_donation(user_id)[0] if get_last_donation(user_id) and get_last_donation(user_id)[1] == "ФМБА" else ''
+            last_donation = get_last_donation(user_id)
+            last_g = last_donation[0] if last_donation and last_donation[1] == "Гаврилова" else ''
+            last_f = last_donation[0] if last_donation and last_donation[1] == "ФМБА" else ''
             sheet.append([user_id, fio, group, count_g, count_f, sum_d, last_g, last_f, phone])
         wb.save('export_stats.xlsx')
         await bot.send_document(message.chat.id, types.FSInputFile('export_stats.xlsx'))
@@ -906,6 +912,5 @@ async def export_stats_handler(message: types.Message):
         await message.answer(f"Ошибка при выгрузке: {str(e)} ⚠️")
         logger.error(f"Ошибка выгрузки stats: {e}")
 
-# Функция регистрации хендлеров
 def register_admin_handlers(dp: Dispatcher):
     dp.include_router(admin_router)
