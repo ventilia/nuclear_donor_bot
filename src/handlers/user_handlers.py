@@ -219,7 +219,9 @@ async def process_previously_used(callback_query: types.CallbackQuery, state: FS
     telegram_id = callback_query.from_user.id
     phone = data.get('phone')
     fio = data.get('fio')
-    existing_user_id = data.get('existing_user_id')
+    existing_user_id = data.get
+
+
     if callback_query.data == 'previously_used_yes':
         # Проверяем, не занят ли номер телефона другим пользователем
         try:
@@ -370,22 +372,25 @@ async def reg_handler(message: types.Message):
     try:
         profile_status = get_profile_status_by_telegram_id(message.from_user.id)
         if not profile_status or profile_status != 'approved':
-            await message.answer("Ваш профиль не одобрен или не существует. ⚠️")
-            logger.warning(f"Пользователь {message.from_user.id} не имеет одобренного профиля")
+            await message.answer("Ваш профиль не одобрен или не существует. Пожалуйста, зарегистрируйтесь через /profilReg. ⚠️")
+            logger.warning(f"Пользователь {message.from_user.id} не имеет одобренного профиля для регистрации на мероприятие")
             return
         events = get_active_events()
         if not events:
             await message.answer("Нет доступных мероприятий. 📅")
-            logger.info("Нет доступных мероприятий для регистрации")
+            logger.info(f"Пользователь {message.from_user.id} запросил регистрацию, но нет доступных мероприятий")
             return
         keyboard = InlineKeyboardBuilder()
         for event in events:
+            if len(event) < 6:
+                logger.error(f"Некорректные данные мероприятия: {event}")
+                continue
             keyboard.button(text=f"{event[1]} {event[2]} - {event[4]} 📆", callback_data=f"reg_{event[0]}")
         await message.answer("Выберите мероприятие: 📋", reply_markup=keyboard.as_markup())
-        logger.info(f"Пользователь {message.from_user.id} запросил регистрацию на мероприятие")
+        logger.info(f"Пользователь {message.from_user.id} запросил регистрацию на мероприятие, найдено {len(events)} активных мероприятий")
     except Exception as e:
-        logger.error(f"Ошибка при получении мероприятий: {e}")
-        await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
+        logger.error(f"Ошибка при получении мероприятий для пользователя {message.from_user.id}: {e}")
+        await message.answer("Произошла ошибка при загрузке мероприятий. Попробуйте позже. ⚠️")
 
 
 @user_router.callback_query(lambda c: c.data.startswith('reg_'))
@@ -394,22 +399,38 @@ async def process_register(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
     try:
         db_user_id = get_user_id_by_telegram_id(user_id)
+        if not db_user_id:
+            await callback_query.answer("Пользователь не найден. Зарегистрируйтесь через /profilReg. ⚠️")
+            logger.warning(f"Пользователь {user_id} не найден в базе при попытке регистрации на мероприятие {event_id}")
+            return
         capacity = get_event_capacity(event_id)
+        if capacity is None:
+            await callback_query.answer("Мероприятие не найдено. ⚠️")
+            logger.error(f"Мероприятие {event_id} не найдено")
+            return
         registered_count = get_event_reg_count(event_id)
+        if registered_count is None:
+            await callback_query.answer("Ошибка при проверке регистраций. ⚠️")
+            logger.error(f"Не удалось получить количество регистраций для мероприятия {event_id}")
+            return
         if registered_count >= capacity:
             await callback_query.answer("Мероприятие заполнено. ❌")
-            logger.warning(f"Мероприятие {event_id} заполнено")
+            logger.warning(f"Мероприятие {event_id} заполнено (регистраций: {registered_count}, вместимость: {capacity})")
             return
         event_date = get_event_date(event_id)
+        if not event_date:
+            await callback_query.answer("Ошибка: некорректная дата мероприятия. ⚠️")
+            logger.error(f"Дата мероприятия {event_id} не найдена")
+            return
         try:
             reminder_date = (datetime.strptime(event_date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
         except ValueError:
-            await callback_query.answer("Ошибка: некорректная дата мероприятия. ⚠️")
+            await callback_query.answer("Ошибка: некорректный формат даты мероприятия. ⚠️")
             logger.error(f"Некорректная дата мероприятия {event_id}: {event_date}")
             return
         add_registration(db_user_id, event_id)
         add_reminder(db_user_id, event_id, reminder_date)
-        logger.info(f"Пользователь {user_id} зарегистрирован на мероприятие {event_id}")
+        logger.info(f"Пользователь {user_id} (DB ID: {db_user_id}) успешно зарегистрирован на мероприятие {event_id}, добавлено напоминание на {reminder_date}")
         await callback_query.answer("Вы зарегистрированы! ✅")
     except Exception as e:
         logger.error(f"Ошибка при регистрации пользователя {user_id} на мероприятие {event_id}: {e}")
@@ -421,8 +442,12 @@ async def profil_handler(message: types.Message, state: FSMContext):
     try:
         user = get_user_by_telegram_id(message.from_user.id)
         if not user:
-            await message.answer("Профиль не найден. ⚠️")
+            await message.answer("Профиль не найден. Пожалуйста, зарегистрируйтесь через /profilReg. ⚠️")
             logger.warning(f"Профиль пользователя {message.from_user.id} не найден")
+            return
+        if len(user) < 7:
+            logger.error(f"Некорректные данные профиля для пользователя {message.from_user.id}: {user}")
+            await message.answer("Ошибка в данных профиля. Обратитесь к администратору. ⚠️")
             return
         user_id = user[0]
         count_gavrilov = get_donations_count_by_center(user_id, "Гаврилова")
@@ -432,10 +457,10 @@ async def profil_handler(message: types.Message, state: FSMContext):
         last_date_center = f"{last_donation[0]} / {last_donation[1]}" if last_donation else "Нет"
         history = get_donations_history(user_id)
         history_str = "\n".join([f"{d[0]} - {d[1]}" for d in history]) if history else "Нет истории"
-        dkm_str = "Да" if user[6] else "Нет"
+        dkm_str = "Да" if user[5] else "Нет"  # user[5] - dkm (было user[6], исправлено на правильный индекс)
         response = (
-            f"Ваш профиль: 📋\nФИО: {user[3]}\nКатегория: {user[4]}\nГруппа: {user[5] or 'Нет'}\n"
-            f"Соцсети: {user[6] or 'Нет'} 🔗\nСтатус: {user[9]} ⚙️\n"
+            f"Ваш профиль: 📋\nФИО: {user[1]}\nКатегория: {user[2]}\nГруппа: {user[3] or 'Нет'}\n"
+            f"Соцсети: {user[4] or 'Нет'} 🔗\nСтатус: {user[6]} ⚙️\n"
             f"Количество донаций: {sum_donations} 💉\nПоследняя донация: {last_date_center} 📅\n"
             f"Вступление в ДКМ: {dkm_str} 🦴\nИстория донаций:\n{history_str}")
         registrations = get_user_registrations(user_id)
@@ -443,6 +468,9 @@ async def profil_handler(message: types.Message, state: FSMContext):
             response += "\n\nВаши текущие регистрации: 📅"
             keyboard = InlineKeyboardBuilder()
             for reg in registrations:
+                if len(reg) < 4:
+                    logger.error(f"Некорректные данные регистрации: {reg}")
+                    continue
                 response += f"\n- {reg[1]} {reg[2]} - {reg[3]}"
                 keyboard.button(text=f"Отменить {reg[1]} ❌", callback_data=f"unreg_{reg[0]}")
             await message.answer(response, reply_markup=keyboard.as_markup())
@@ -451,7 +479,7 @@ async def profil_handler(message: types.Message, state: FSMContext):
         logger.info(f"Пользователь {message.from_user.id} запросил просмотр профиля")
     except Exception as e:
         logger.error(f"Ошибка при получении профиля пользователя {message.from_user.id}: {e}")
-        await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
+        await message.answer("Произошла ошибка при загрузке профиля. Попробуйте позже. ⚠️")
 
 
 @user_router.callback_query(lambda c: c.data.startswith('unreg_'))
@@ -460,6 +488,10 @@ async def process_unreg(callback_query: types.CallbackQuery, state: FSMContext):
     user_id = callback_query.from_user.id
     try:
         db_user_id = get_user_id_by_telegram_id(user_id)
+        if not db_user_id:
+            await callback_query.answer("Пользователь не найден. ⚠️")
+            logger.warning(f"Пользователь {user_id} не найден при отмене регистрации на мероприятие {event_id}")
+            return
         cancel_registration(db_user_id, event_id)
         await state.set_state(CancelReasonState.reason)
         await state.update_data(reg_id=get_registration_id(db_user_id, event_id))
@@ -496,6 +528,9 @@ async def process_cancel_reason(message: types.Message, state: FSMContext):
         add_non_attendance_reason(reg_id, reason)
         await message.answer("Причина отмены записана. Спасибо!", reply_markup=types.ReplyKeyboardRemove())
         logger.info(f"Записана причина отмены для reg {reg_id}: {reason}")
+    else:
+        logger.warning(f"Не найден reg_id для отмены регистрации пользователем {message.from_user.id}")
+        await message.answer("Ошибка при записи причины отмены. Попробуйте снова. ⚠️")
     await state.clear()
 
 
@@ -508,7 +543,7 @@ async def stats_handler(message: types.Message):
             await message.answer(f"Ваша статистика: 📊\nЗарегистрировано на мероприятий: {reg_count} 📅")
             logger.info(f"Пользователь {message.from_user.id} запросил статистику: {reg_count} регистраций")
         else:
-            await message.answer("Вы не зарегистрированы. ⚠️")
+            await message.answer("Вы не зарегистрированы. Пожалуйста, используйте /profilReg. ⚠️")
             logger.warning(f"Пользователь {message.from_user.id} не зарегистрирован")
     except Exception as e:
         logger.error(f"Ошибка при получении статистики пользователя {message.from_user.id}: {e}")
@@ -519,7 +554,7 @@ async def stats_handler(message: types.Message):
 async def ask_handler(message: types.Message, state: FSMContext):
     profile_status = get_profile_status_by_telegram_id(message.from_user.id)
     if not profile_status or profile_status != 'approved':
-        await message.answer("Ваш профиль не одобрен или не существует. ⚠️")
+        await message.answer("Ваш профиль не одобрен или не существует. Пожалуйста, зарегистрируйтесь через /profilReg. ⚠️")
         return
     await state.set_state(AskQuestionState.text)
     keyboard = ReplyKeyboardMarkup(
@@ -543,6 +578,10 @@ async def process_ask_text(message: types.Message, state: FSMContext):
         return
     try:
         user_id = get_user_id_by_telegram_id(message.from_user.id)
+        if not user_id:
+            await message.answer("Пользователь не найден. Пожалуйста, зарегистрируйтесь через /profilReg. ⚠️")
+            logger.warning(f"Пользователь {message.from_user.id} не найден при попытке задать вопрос")
+            return
         question_id = add_question(user_id, text)
         await message.answer("Ваш вопрос отправлен организаторам. Они ответят в ближайшее время.",
                              reply_markup=types.ReplyKeyboardRemove())

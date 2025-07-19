@@ -18,6 +18,7 @@ from src.database.db import mark_question_answered, get_user_telegram_id, import
 from src.utils.keyboards import is_admin
 from src.database.db import logger, add_admin, delete_event, get_users_by_category, get_event_by_date, update_attended
 import openpyxl
+import re
 
 admin_router = Router()
 
@@ -633,7 +634,7 @@ async def show_profiles(message: types.Message, offset: int):
             pagination_keyboard.button(text="Назад ⬅️", callback_data=f"prev_{offset - 5}")
         if len(users) == 5:
             pagination_keyboard.button(text="Вперед ➡️", callback_data=f"next_{offset + 5}")
-        pagination_markup = pagination_keyboard.as_markup() if pagination_keyboard.row() else None  # Исправление: row() генерирует inline_keyboard
+        pagination_markup = pagination_keyboard.as_markup() if pagination_keyboard.inline_keyboard else None
         for user in users:
             reg_count = get_user_registrations_count(user[0])
             text = f"{user[1]}, Группа: {user[2]}, (ID: {user[0]}), Регистраций: {reg_count} 📝"
@@ -717,7 +718,7 @@ async def upload_stats_handler(message: types.Message):
     if not is_admin(message.from_user.id):
         await message.answer("Нет прав. ⚠️")
         return
-    await message.answer("Отправьте файл Excel со статистикой (ФИО, дата, ЦК). 📂")
+    await message.answer("Отправьте файл Excel со статистикой (ФИО, Группа, Кол-во Гаврилова, Кол-во ФМБА, Сумма, Дата последней Гаврилова, Дата последней ФМБА, Контакты соцсети, Телефон). 📂")
 
 @admin_router.message(lambda message: message.document and message.document.file_name.endswith('.xlsx'))
 async def process_upload_stats(message: types.Message):
@@ -733,31 +734,62 @@ async def process_upload_stats(message: types.Message):
         await bot.download_file(file_path, "temp_stats.xlsx")
         wb = openpyxl.load_workbook('temp_stats.xlsx')
         sheet = wb.active
+        updated_count = 0
+        created_count = 0
+        skipped_count = 0
         for row in sheet.iter_rows(min_row=2, values_only=True):
-            fio = str(row[0]).strip()
-            date = str(row[1]) if len(row) > 1 else None
-            center = str(row[2]) if len(row) > 2 else None
-            if not fio or not date or not center:
+            fio = str(row[0]).strip().title() if row[0] else ''
+            if not fio:
+                skipped_count += 1
                 continue
+            user_group = str(row[1]).strip() if len(row) > 1 and row[1] else ''
+            category = ('сотрудник' if 'сотрудник' in user_group.lower() or 'инженер' in user_group.lower()
+                        else 'студент' if re.match(r'^[А-Я]\d{2}-\d{3}$', user_group)
+                        else 'внешний')
+            count_gavrilov = int(row[2]) if len(row) > 2 and row[2] else 0
+            count_fmba = int(row[3]) if len(row) > 3 and row[3] else 0
+            last_gavrilov = row[5] if len(row) > 5 and row[5] else None
+            last_fmba = row[6] if len(row) > 6 and row[6] else None
+            social_contacts = str(row[7]).strip() if len(row) > 7 and row[7] else None
+            phone = str(row[8]).strip() if len(row) > 8 and row[8] else None
             user = get_user_by_fio(fio)
-            if not user:
-                # Создаём нового, если не найден
+            if user:
+                user_id = user[0]
+                # Обновляем phone, если предоставлен и отсутствует в БД
+                if phone and not user[2]:  # user[2] - phone
+                    with get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('UPDATE users SET phone = ? WHERE id = ?', (phone, user_id))
+                        conn.commit()
+                    logger.info(f"Обновлен телефон {phone} для пользователя {fio}")
+                # Добавляем донации, если count > 0
+                for _ in range(count_gavrilov):
+                    add_donation(user_id, last_gavrilov or 'unknown', 'Гаврилова')
+                for _ in range(count_fmba):
+                    add_donation(user_id, last_fmba or 'unknown', 'ФМБА')
+                updated_count += 1
+            else:
+                # Создаем нового пользователя
                 with get_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute('''INSERT INTO users 
-                        (fio, category, profile_status)
-                        VALUES (?, 'unknown', 'approved')''', (fio,))
+                        (phone, fio, category, user_group, social_contacts, profile_status)
+                        VALUES (?, ?, ?, ?, ?, 'approved')''',
+                                   (phone, fio, category, user_group, social_contacts))
                     user_id = cursor.lastrowid
                     conn.commit()
-                logger.info(f"Создан новый пользователь по ФИО {fio} для дозаписи статистики")
-            else:
-                user_id = user[0]
-            add_donation(user_id, date, center)
-        await message.answer("Статистика загружена и БД обновлена (добавлены новые пользователи при необходимости). ✅")
-        logger.info(f"Админ {message.from_user.id} загрузил статистику из Excel с дозаписью пользователей")
+                # Добавляем донации
+                for _ in range(count_gavrilov):
+                    add_donation(user_id, last_gavrilov or 'unknown', 'Гаврилова')
+                for _ in range(count_fmba):
+                    add_donation(user_id, last_fmba or 'unknown', 'ФМБА')
+                created_count += 1
+                logger.info(f"Создан новый пользователь {fio} с телефоном {phone or 'Отсутствует'} при дозагрузке статистики")
+        await message.answer(f"Статистика дозагружена: обновлено {updated_count}, создано {created_count}, пропущено {skipped_count}. ✅")
+        logger.info(f"Админ {message.from_user.id} дозагрузил статистику из Excel")
     except Exception as e:
-        await message.answer(f"Ошибка при загрузке: {str(e)} ⚠️")
-        logger.error(f"Ошибка загрузки stats Excel: {e}")
+        await message.answer(f"Ошибка при дозагрузке: {str(e)} ⚠️")
+        logger.error(f"Ошибка дозагрузки stats Excel: {e}")
 
 @admin_router.message(Command(commands=['upload_attendance']))
 async def upload_attendance_handler(message: types.Message, state: FSMContext):
@@ -790,53 +822,55 @@ async def process_upload_attendance(message: types.Message, state: FSMContext):
         wb = openpyxl.load_workbook('temp_attendance.xlsx')
         sheet = wb.active
         date = None
-        attended_fios = set()
+        attended_fios = {}  # dict fio: center для добавления донации
         for row in sheet.iter_rows(min_row=2, values_only=True):
-            fio = str(row[0]).strip() if row[0] else ''
+            fio = str(row[0]).strip().title() if row[0] else ''
             row_date = str(row[1]) if len(row) > 1 else None
             center = str(row[2]) if len(row) > 2 else None
             if not fio or not row_date or not center:
                 continue
             if date is None:
-                date = row_date  # Берем дату из первой строки
+                date = row_date
             elif row_date != date:
                 await message.answer("Даты в файле отличаются. Используйте файл с одной датой. ⚠️")
                 return
-            attended_fios.add(fio)
-            user = get_user_by_fio(fio)
-            if user:
-                user_id = user[0]
-                add_donation(user_id, date, center)
-                # Отметить attended для registrations на событие по дате
-                event_id = get_event_by_date(date)
-                if event_id:
-                    cursor = get_connection().cursor()
-                    cursor.execute('SELECT id FROM registrations WHERE user_id = ? AND event_id = ?', (user_id, event_id))
-                    reg_id = cursor.fetchone()
-                    if reg_id:
-                        update_attended(reg_id[0])
-        if date:
-            event_id = get_event_by_date(date)
-            if event_id:
-                # Для всех зарегистрированных на событие
-                registrations = get_registrations_by_event(event_id)  # Новая функция, добавить в db.py
-                for reg in registrations:
-                    reg_id = reg[0]
-                    user_id = reg[1]
-                    telegram_id = get_user_telegram_id(user_id)
-                    if telegram_id:
-                        if get_user_by_id(user_id)[3] in attended_fios:  # Пришли
-                            await bot.send_message(telegram_id, "Спасибо, что пришли на мероприятие! Просьба написать отзыв. 📝")
-                            logger.info(f"Отправлен запрос отзыва пользователю {telegram_id} для события {event_id}")
-                        else:  # Не пришли
-                            keyboard = InlineKeyboardBuilder()
-                            keyboard.button(text="Медотвод ⚕️", callback_data=f"reason_med_{reg_id}")
-                            keyboard.button(text="Личные причины 👤", callback_data=f"reason_personal_{reg_id}")
-                            keyboard.button(text="Не захотел 😔", callback_data=f"reason_no_{reg_id}")
-                            await bot.send_message(telegram_id, "Вы зарегистрировались на мероприятие, но не пришли. Укажите причину: ❓", reply_markup=keyboard.as_markup())
-                            logger.info(f"Отправлен опрос неявки пользователю {telegram_id} для reg {reg_id}")
-        await message.answer("Посещаемость загружена, донации добавлены, уведомления отправлены. ✅")
-        logger.info(f"Админ {message.from_user.id} загрузил посещаемость из Excel")
+            attended_fios[fio] = center  # Последний center если дубли fio
+        if not date:
+            await message.answer("Нет данных с датой в файле. ⚠️")
+            return
+        event_id = get_event_by_date(date)
+        if not event_id:
+            await message.answer(f"Мероприятие на дату {date} не найдено. ⚠️")
+            return
+        registrations = get_registrations_by_event(event_id)
+        processed_count = 0
+        for reg in registrations:
+            reg_id = reg[0]
+            user_id = reg[1]
+            user = get_user_by_id(user_id)
+            if not user:
+                continue
+            fio_db = user[3]  # Уже .title() в БД
+            telegram_id = user[1]
+            if telegram_id:
+                if fio_db in attended_fios:
+                    # Пришли: добавить донацию, отметить attended, запрос отзыва
+                    center = attended_fios[fio_db]
+                    add_donation(user_id, date, center)
+                    update_attended(reg_id, 1)
+                    await bot.send_message(telegram_id, "Спасибо, что пришли на мероприятие! Просьба написать отзыв. 📝")
+                    logger.info(f"Отправлен запрос отзыва пользователю {telegram_id} для события {event_id}")
+                else:
+                    # Не пришли: опрос причины
+                    keyboard = InlineKeyboardBuilder()
+                    keyboard.button(text="Медотвод ⚕️", callback_data=f"reason_med_{reg_id}")
+                    keyboard.button(text="Личные причины 👤", callback_data=f"reason_personal_{reg_id}")
+                    keyboard.button(text="Не захотел 😔", callback_data=f"reason_no_{reg_id}")
+                    await bot.send_message(telegram_id, "Вы зарегистрировались на прошедшее мероприятие, но не пришли. Укажите причину: ❓", reply_markup=keyboard.as_markup())
+                    logger.info(f"Отправлен опрос неявки пользователю {telegram_id} для reg {reg_id}")
+                processed_count += 1
+        await message.answer(f"Посещаемость загружена: обработано {processed_count} регистраций, уведомления отправлены. ✅")
+        logger.info(f"Админ {message.from_user.id} загрузил посещаемость из Excel для даты {date}")
         await state.clear()
     except Exception as e:
         await message.answer(f"Ошибка при загрузке: {str(e)} ⚠️")
