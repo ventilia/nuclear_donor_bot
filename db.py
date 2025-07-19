@@ -1,3 +1,4 @@
+# db.py
 import sqlite3
 import openpyxl
 import logging
@@ -76,6 +77,15 @@ def init_db():
                 registration_id INTEGER,
                 reason TEXT,
                 FOREIGN KEY (registration_id) REFERENCES registrations(id)
+            )''')
+            # Новая таблица для вопросов/сообщений от пользователей
+            cursor.execute('''CREATE TABLE IF NOT EXISTS questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                text TEXT,
+                answered BOOLEAN DEFAULT 0,
+                timestamp TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )''')
             conn.commit()
             logger.info("База данных успешно инициализирована")
@@ -482,3 +492,32 @@ def get_user_by_name_surname(name, surname):
         cursor = conn.cursor()
         cursor.execute('SELECT id FROM users WHERE name = ? AND surname = ?', (name, surname))
         return cursor.fetchone()
+
+# Функции для вопросов/сообщений
+def add_question(user_id, text):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        timestamp = datetime.now().isoformat()
+        cursor.execute('INSERT INTO questions (user_id, text, timestamp) VALUES (?, ?, ?)',
+                       (user_id, text, timestamp))
+        conn.commit()
+        return cursor.lastrowid
+
+def get_unanswered_questions():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, user_id, text, timestamp FROM questions WHERE answered = 0 ORDER BY timestamp DESC')
+        return cursor.fetchall()
+
+def mark_question_answered(question_id):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE questions SET answered = 1 WHERE id = ?', (question_id,))
+        conn.commit()
+
+def get_user_telegram_id(user_id):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT telegram_id FROM users WHERE id = ?', (user_id,))
+        result = cursor.fetchone()
+        return result[0] if result else None

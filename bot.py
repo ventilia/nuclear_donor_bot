@@ -1,3 +1,4 @@
+# bot.py
 import asyncio
 import schedule
 from datetime import datetime, timedelta
@@ -17,10 +18,13 @@ from db import (init_db, import_from_excel, get_user_by_phone, get_consent_by_ph
                 update_profile_status, get_telegram_id_by_user_id, add_event, get_consented_users_telegram_ids,
                 get_all_events, get_registrations_count, get_attended_count, get_event_status, update_event_status,
                 get_user_by_id, get_users_paginated, delete_user_by_id, get_all_users_for_export,
-                get_reminders_to_send, get_event_by_id, delete_reminder, get_past_events, get_non_attended_registrations,
-                add_non_attendance_reason, get_user_id_by_telegram_id, get_event_capacity, get_registrations_count as get_event_reg_count,
+                get_reminders_to_send, get_event_by_id, delete_reminder, get_past_events,
+                get_non_attended_registrations,
+                add_non_attendance_reason, get_user_id_by_telegram_id, get_event_capacity,
+                get_registrations_count as get_event_reg_count,
                 get_event_date, add_registration, add_reminder, cancel_registration, add_donation, update_dkm,
-                get_user_by_name_surname, logger)
+                get_user_by_name_surname, logger, add_question, get_unanswered_questions, mark_question_answered,
+                get_user_telegram_id, get_connection)
 
 # Токен бота
 TOKEN = "7893139526:AAEw3mRwp8btOI4HWWhbLzL0j48kaQBUa50"
@@ -55,9 +59,20 @@ class AddEventStates(StatesGroup):
     description = State()
     capacity = State()
 
-class EditInfoStates(StatesGroup):
-    section = State()
+class AskQuestionState(StatesGroup):
     text = State()
+
+class AnswerQuestionState(StatesGroup):
+    select = State()
+    response = State()
+
+class CancelReasonState(StatesGroup):
+    reason = State()
+
+class BroadcastState(StatesGroup):
+    text = State()
+    photo = State()
+    confirm = State()
 
 # --- Команды пользователя ---
 
@@ -166,6 +181,7 @@ async def confirm_existing(callback_query: types.CallbackQuery, state: FSMContex
                              "/profil - Посмотреть/изменить профиль 👤\n"
                              "/stats - Моя статистика 📊\n"
                              "/info - Информационные разделы 📖\n"
+                             "/ask - Задать вопрос организаторам ❓\n"
                              "/help - Показать этот список ❓")
                 await callback_query.message.answer(help_text)
                 await state.clear()
@@ -199,11 +215,19 @@ async def process_consent(callback_query: types.CallbackQuery, state: FSMContext
 @dp.message(Command(commands=['profilReg']))
 async def profil_reg_handler(message: types.Message, state: FSMContext):
     await state.set_state(ProfilRegStates.name)
-    await message.answer("Введите ваше имя (только буквы): ✍️")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите ваше имя (только буквы): ✍️", reply_markup=keyboard)
     logger.info(f"Пользователь {message.from_user.id} начал регистрацию профиля")
 
 @dp.message(ProfilRegStates.name)
 async def process_name(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.clear()
+        await message.answer("Регистрация отменена.", reply_markup=types.ReplyKeyboardRemove())
+        return
     name = message.text.strip().capitalize()
     if not re.match(r'^[А-Яа-яA-Za-z\s]+$', name):
         await message.answer("Имя должно содержать только буквы. Попробуйте снова. ⚠️")
@@ -211,10 +235,22 @@ async def process_name(message: types.Message, state: FSMContext):
         return
     await state.update_data(name=name)
     await state.set_state(ProfilRegStates.surname)
-    await message.answer("Введите вашу фамилию (только буквы): ✍️")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите вашу фамилию (только буквы): ✍️", reply_markup=keyboard)
 
 @dp.message(ProfilRegStates.surname)
 async def process_surname(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.set_state(ProfilRegStates.name)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Назад 🔙")]],
+            resize_keyboard=True
+        )
+        await message.answer("Введите ваше имя (только буквы): ✍️", reply_markup=keyboard)
+        return
     surname = message.text.strip().capitalize()
     if not re.match(r'^[А-Яа-яA-Za-z\s]+$', surname):
         await message.answer("Фамилия должна содержать только буквы. Попробуйте снова. ⚠️")
@@ -234,15 +270,31 @@ async def process_category(callback_query: types.CallbackQuery, state: FSMContex
     await state.update_data(category=category)
     if category == 'student':
         await state.set_state(ProfilRegStates.group)
-        await callback_query.message.answer("Введите номер группы (формат: Б21-302): 📚")
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Назад 🔙")]],
+            resize_keyboard=True
+        )
+        await callback_query.message.answer("Введите номер группы (формат: Б21-302): 📚", reply_markup=keyboard)
     else:
         await state.set_state(ProfilRegStates.social_contacts)
-        await callback_query.message.answer("Введите контакты в соцсетях (или 'нет'): 🔗")
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Назад 🔙")]],
+            resize_keyboard=True
+        )
+        await callback_query.message.answer("Введите контакты в соцсетях (или 'нет'): 🔗", reply_markup=keyboard)
     await callback_query.answer()
     logger.info(f"Пользователь {callback_query.from_user.id} выбрал категорию: {category}")
 
 @dp.message(ProfilRegStates.group)
 async def process_group(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.set_state(ProfilRegStates.category)
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="Студент 🎓", callback_data="cat_student")
+        keyboard.button(text="Сотрудник 👔", callback_data="cat_employee")
+        keyboard.button(text="Внешний донор 🌍", callback_data="cat_external")
+        await message.answer("Выберите категорию: 📂", reply_markup=keyboard.as_markup())
+        return
     group = message.text.strip().upper()
     if not re.match(r'^[А-Я]\d{2}-\d{3}$', group):
         await message.answer("Неверный формат группы (пример: Б21-302). Попробуйте снова. ⚠️")
@@ -250,17 +302,39 @@ async def process_group(message: types.Message, state: FSMContext):
         return
     await state.update_data(group=group)
     await state.set_state(ProfilRegStates.social_contacts)
-    await message.answer("Введите контакты в соцсетях (или 'нет'): 🔗")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите контакты в соцсетях (или 'нет'): 🔗", reply_markup=keyboard)
 
 @dp.message(ProfilRegStates.social_contacts)
 async def process_social_contacts(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        data = await state.get_data()
+        category = data.get('category')
+        if category == 'student':
+            await state.set_state(ProfilRegStates.group)
+            keyboard = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Назад 🔙")]],
+                resize_keyboard=True
+            )
+            await message.answer("Введите номер группы (формат: Б21-302): 📚", reply_markup=keyboard)
+        else:
+            await state.set_state(ProfilRegStates.category)
+            keyboard = InlineKeyboardBuilder()
+            keyboard.button(text="Студент 🎓", callback_data="cat_student")
+            keyboard.button(text="Сотрудник 👔", callback_data="cat_employee")
+            keyboard.button(text="Внешний донор 🌍", callback_data="cat_external")
+            await message.answer("Выберите категорию: 📂", reply_markup=keyboard.as_markup())
+        return
     social_contacts = message.text.strip() if message.text.strip().lower() != 'нет' else None
     data = await state.get_data()
     try:
         save_or_update_user(message.from_user.id, data.get('phone'), data['name'], data['surname'],
                             data['category'], data.get('group'), social_contacts)
         await state.clear()
-        await message.answer("Ваш профиль отправлен на модерацию. ⏳")
+        await message.answer("Ваш профиль отправлен на модерацию. ⏳", reply_markup=types.ReplyKeyboardRemove())
     except Exception as e:
         logger.error(f"Ошибка при сохранении/обновлении профиля пользователя {data.get('name', 'Unknown')}: {e}")
         await message.answer("Произошла ошибка при сохранении профиля. Попробуйте позже. ⚠️")
@@ -273,6 +347,7 @@ async def help_handler(message: types.Message):
                          "/profil - Посмотреть/изменить профиль\n"
                          "/stats - Моя статистика\n"
                          "/info - Информационные разделы\n"
+                         "/ask - Задать вопрос организаторам ❓\n"
                          "/help - Показать этот список")
     logger.info(f"Пользователь {message.from_user.id} вызвал команду /help")
 
@@ -365,17 +440,43 @@ async def profil_handler(message: types.Message, state: FSMContext):
         await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
 
 @dp.callback_query(lambda c: c.data.startswith('unreg_'))
-async def process_unreg(callback_query: types.CallbackQuery):
+async def process_unreg(callback_query: types.CallbackQuery, state: FSMContext):
     event_id = int(callback_query.data.split('_')[1])
     user_id = callback_query.from_user.id
     try:
         db_user_id = get_user_id_by_telegram_id(user_id)
         cancel_registration(db_user_id, event_id)
-        logger.info(f"Пользователь {user_id} отменил регистрацию на мероприятие {event_id}")
-        await callback_query.answer("Регистрация отменена. ❌")
+        await state.set_state(CancelReasonState.reason)
+        await state.update_data(reg_id=get_registration_id(db_user_id, event_id))  # Получить reg_id
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Медотвод ⚕️")],
+                      [KeyboardButton(text="Личные причины 👤")],
+                      [KeyboardButton(text="Не захотел 😔")]],
+            resize_keyboard=True
+        )
+        await callback_query.message.answer("Регистрация отменена. Пожалуйста, укажите причину отмены:", reply_markup=keyboard)
+        logger.info(f"Пользователь {user_id} отменил регистрацию на мероприятие {event_id}, запрошенная причина")
     except Exception as e:
         logger.error(f"Ошибка при отмене регистрации пользователя {user_id} на {event_id}: {e}")
         await callback_query.answer("Произошла ошибка. Попробуйте позже. ⚠️")
+
+def get_registration_id(user_id, event_id):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM registrations WHERE user_id = ? AND event_id = ?', (user_id, event_id))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+@dp.message(CancelReasonState.reason)
+async def process_cancel_reason(message: types.Message, state: FSMContext):
+    reason = message.text
+    data = await state.get_data()
+    reg_id = data.get('reg_id')
+    if reg_id:
+        add_non_attendance_reason(reg_id, reason)
+        await message.answer("Причина отмены записана. Спасибо!", reply_markup=types.ReplyKeyboardRemove())
+        logger.info(f"Записана причина отмены для reg {reg_id}: {reason}")
+    await state.clear()
 
 @dp.message(Command(commands=['stats']))
 async def stats_handler(message: types.Message):
@@ -422,10 +523,197 @@ async def process_info(callback_query: types.CallbackQuery):
         logger.warning(f"Файл {file_name} не найден")
     except Exception as e:
         logger.error(f"Ошибка при чтении файла {file_name}: {e}")
-        await callback_query.message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
+        await callback_query.answer("Произошла ошибка. Попробуйте позже. ⚠️")
     await callback_query.answer()
 
+@dp.message(Command(commands=['ask']))
+async def ask_handler(message: types.Message, state: FSMContext):
+    profile_status = get_profile_status_by_telegram_id(message.from_user.id)
+    if not profile_status or profile_status != 'approved':
+        await message.answer("Ваш профиль не одобрен или не существует. ⚠️")
+        return
+    await state.set_state(AskQuestionState.text)
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите ваш вопрос или сообщение организаторам:", reply_markup=keyboard)
+
+@dp.message(AskQuestionState.text)
+async def process_ask_text(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.clear()
+        await message.answer("Операция отменена.", reply_markup=types.ReplyKeyboardRemove())
+        return
+    text = message.text.strip()
+    if not text:
+        await message.answer("Сообщение не может быть пустым. Попробуйте снова.")
+        return
+    try:
+        user_id = get_user_id_by_telegram_id(message.from_user.id)
+        question_id = add_question(user_id, text)
+        await message.answer("Ваш вопрос отправлен организаторам. Они ответят в ближайшее время.", reply_markup=types.ReplyKeyboardRemove())
+        # Уведомление админам с обработкой ошибок
+        admins = [123456789, 1653833795, 1191457973]
+        for admin_id in admins:
+            try:
+                await bot.send_message(admin_id, f"Новый вопрос от пользователя ID {user_id}: {text}\nОтветьте через /answer")
+            except Exception as e:
+                logger.error(f"Ошибка при отправке уведомления админу {admin_id}: {e}")
+        logger.info(f"Пользователь {message.from_user.id} задал вопрос: {text}")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке вопроса от {message.from_user.id}: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
+    await state.clear()
+
 # --- Админские команды ---
+
+@dp.message(Command(commands=['answer']))
+async def answer_handler(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав. ⚠️")
+        return
+    try:
+        questions = get_unanswered_questions()
+        if not questions:
+            await message.answer("Нет неотвеченных вопросов.")
+            return
+        keyboard = InlineKeyboardBuilder()
+        for q in questions:
+            user_tg_id = get_user_telegram_id(q[1])
+            keyboard.button(text=f"Вопрос {q[0]} от {user_tg_id}", callback_data=f"ans_{q[0]}")
+        await message.answer("Выберите вопрос для ответа:", reply_markup=keyboard.as_markup())
+        await state.set_state(AnswerQuestionState.select)
+    except Exception as e:
+        logger.error(f"Ошибка при получении вопросов для ответа: {e}")
+        await message.answer("Произошла ошибка.")
+
+@dp.callback_query(lambda c: c.data.startswith('ans_'), AnswerQuestionState.select)
+async def select_question(callback_query: types.CallbackQuery, state: FSMContext):
+    question_id = int(callback_query.data.split('_')[1])
+    await state.update_data(question_id=question_id)
+    await state.set_state(AnswerQuestionState.response)
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await callback_query.message.answer("Введите ответ на вопрос:", reply_markup=keyboard)
+    await callback_query.answer()
+
+@dp.message(AnswerQuestionState.response)
+async def process_answer_text(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.set_state(AnswerQuestionState.select)
+        await answer_handler(message, state)  # Вернуться к списку
+        return
+    text = message.text.strip()
+    if not text:
+        await message.answer("Ответ не может быть пустым. Попробуйте снова.")
+        return
+    data = await state.get_data()
+    question_id = data.get('question_id')
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id FROM questions WHERE id = ?', (question_id,))
+            user_id = cursor.fetchone()[0]
+        user_tg_id = get_user_telegram_id(user_id)
+        if user_tg_id:
+            await bot.send_message(user_tg_id, f"Ответ на ваш вопрос от организаторов: {text}")
+            mark_question_answered(question_id)
+            await message.answer("Ответ отправлен пользователю.", reply_markup=types.ReplyKeyboardRemove())
+            logger.info(f"Админ {message.from_user.id} ответил на вопрос {question_id}")
+        else:
+            await message.answer("Не удалось найти Telegram ID пользователя.")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке ответа на вопрос {question_id}: {e}")
+        await message.answer("Произошла ошибка.")
+    await state.clear()
+
+@dp.message(Command(commands=['broadcast']))
+async def broadcast_handler(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав. ⚠️")
+        return
+    await state.set_state(BroadcastState.text)
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите текст для рассылки всем пользователям:", reply_markup=keyboard)
+
+@dp.message(BroadcastState.text)
+async def process_broadcast_text(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.clear()
+        await message.answer("Рассылка отменена.", reply_markup=types.ReplyKeyboardRemove())
+        return
+    text = message.text.strip()
+    if not text:
+        await message.answer("Текст не может быть пустым. Попробуйте снова.")
+        return
+    await state.update_data(text=text)
+    await state.set_state(BroadcastState.photo)
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Без фото 📄")],
+                  [KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Прикрепите фото (если нужно) или нажмите 'Без фото':", reply_markup=keyboard)
+
+@dp.message(BroadcastState.photo)
+async def process_broadcast_photo(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.set_state(BroadcastState.text)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Назад 🔙")]],
+            resize_keyboard=True
+        )
+        await message.answer("Введите текст для рассылки:", reply_markup=keyboard)
+        return
+    if message.text == "Без фото 📄":
+        photo = None
+    elif message.photo:
+        photo = message.photo[-1].file_id
+    else:
+        await message.answer("Пожалуйста, прикрепите фото или выберите 'Без фото'.")
+        return
+    await state.update_data(photo=photo)
+    await state.set_state(BroadcastState.confirm)
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Подтвердить ✅", callback_data="broadcast_confirm")
+    keyboard.button(text="Отмена ❌", callback_data="broadcast_cancel")
+    await message.answer("Подтвердите рассылку?", reply_markup=keyboard.as_markup())
+
+@dp.callback_query(lambda c: c.data in ['broadcast_confirm', 'broadcast_cancel'], BroadcastState.confirm)
+async def confirm_broadcast(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.data == 'broadcast_cancel':
+        await state.clear()
+        await callback_query.message.answer("Рассылка отменена.")
+        await callback_query.answer()
+        return
+    data = await state.get_data()
+    text = data.get('text')
+    photo = data.get('photo')
+    try:
+        users = get_consented_users_telegram_ids()
+        sent_count = 0
+        for tg_id in users:
+            try:
+                if photo:
+                    await bot.send_photo(tg_id, photo, caption=text)
+                else:
+                    await bot.send_message(tg_id, text)
+                sent_count += 1
+            except Exception as e:
+                logger.warning(f"Ошибка отправки рассылки пользователю {tg_id}: {e}")
+        await callback_query.message.answer(f"Рассылка завершена. Отправлено {sent_count} пользователям.")
+        logger.info(f"Админ {callback_query.from_user.id} отправил рассылку: {text[:50]}...")
+    except Exception as e:
+        logger.error(f"Ошибка при рассылке: {e}")
+        await callback_query.message.answer("Произошла ошибка при рассылке.")
+    await state.clear()
+    await callback_query.answer()
 
 @dp.message(Command(commands=['admin_stats']))
 async def admin_stats_handler(message: types.Message):
@@ -483,6 +771,7 @@ async def process_profile_action(callback_query: types.CallbackQuery):
                          "/profil - Посмотреть/изменить профиль 👤\n"
                          "/stats - Моя статистика 📊\n"
                          "/info - Информационные разделы 📖\n"
+                         "/ask - Задать вопрос организаторам ❓\n"
                          "/help - Показать этот список ❓")
             await bot.send_message(telegram_id, help_text)
         logger.info(f"Профиль пользователя ID {user_id} {status} админом {callback_query.from_user.id}")
@@ -504,9 +793,10 @@ async def admin_help_handler(message: types.Message):
                          "/see_profile - Просмотр профилей\n"
                          "/see_profile (числовый аргумент) - Просмотр конкретного пользователя по айди\n"
                          "/import_excel - Импорт из Excel\n"
-                         "/edit_info - Редактировать инфо разделы\n"
                          "/upload_stats - Загрузить статистику из Excel\n"
                          "/export_stats - Выгрузить статистику в Excel\n"
+                         "/answer - Ответить на вопросы пользователей\n"
+                         "/broadcast - Рассылка сообщений всем пользователям\n"
                          "/help - Список пользовательских команд")
     logger.info(f"Админ {message.from_user.id} запросил список админских команд")
 
@@ -517,11 +807,19 @@ async def add_event_handler(message: types.Message, state: FSMContext):
         logger.warning(f"Пользователь {message.from_user.id} пытался добавить мероприятие")
         return
     await state.set_state(AddEventStates.date)
-    await message.answer("Введите дату (YYYY-MM-DD): 📅")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите дату (YYYY-MM-DD): 📅", reply_markup=keyboard)
     logger.info(f"Админ {message.from_user.id} начал добавление мероприятия")
 
 @dp.message(AddEventStates.date)
 async def process_event_date(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.clear()
+        await message.answer("Добавление отменено.", reply_markup=types.ReplyKeyboardRemove())
+        return
     try:
         event_date = datetime.strptime(message.text, '%Y-%m-%d')
         if event_date < datetime.now().replace(hour=0, minute=0, second=0, microsecond=0):
@@ -534,28 +832,76 @@ async def process_event_date(message: types.Message, state: FSMContext):
         return
     await state.update_data(date=message.text)
     await state.set_state(AddEventStates.time)
-    await message.answer("Введите время (HH:MM): ⏰")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите время (HH:MM): ⏰", reply_markup=keyboard)
 
 @dp.message(AddEventStates.time)
 async def process_event_time(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.set_state(AddEventStates.date)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Назад 🔙")]],
+            resize_keyboard=True
+        )
+        await message.answer("Введите дату (YYYY-MM-DD): 📅", reply_markup=keyboard)
+        return
     await state.update_data(time=message.text)
     await state.set_state(AddEventStates.location)
-    await message.answer("Введите место: 📍")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите место: 📍", reply_markup=keyboard)
 
 @dp.message(AddEventStates.location)
 async def process_event_location(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.set_state(AddEventStates.time)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Назад 🔙")]],
+            resize_keyboard=True
+        )
+        await message.answer("Введите время (HH:MM): ⏰", reply_markup=keyboard)
+        return
     await state.update_data(location=message.text)
     await state.set_state(AddEventStates.description)
-    await message.answer("Введите описание: 📝")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите описание: 📝", reply_markup=keyboard)
 
 @dp.message(AddEventStates.description)
 async def process_event_description(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.set_state(AddEventStates.location)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Назад 🔙")]],
+            resize_keyboard=True
+        )
+        await message.answer("Введите место: 📍", reply_markup=keyboard)
+        return
     await state.update_data(description=message.text)
     await state.set_state(AddEventStates.capacity)
-    await message.answer("Введите вместимость: 👥")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Введите вместимость: 👥", reply_markup=keyboard)
 
 @dp.message(AddEventStates.capacity)
 async def process_event_capacity(message: types.Message, state: FSMContext):
+    if message.text == "Назад 🔙":
+        await state.set_state(AddEventStates.description)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Назад 🔙")]],
+            resize_keyboard=True
+        )
+        await message.answer("Введите описание: 📝", reply_markup=keyboard)
+        return
     try:
         capacity = int(message.text)
         if capacity <= 0:
@@ -568,7 +914,7 @@ async def process_event_capacity(message: types.Message, state: FSMContext):
     try:
         add_event(data['date'], data['time'], data['location'], data['description'], capacity)
         await state.clear()
-        await message.answer("Мероприятие добавлено. ✅")
+        await message.answer("Мероприятие добавлено. ✅", reply_markup=types.ReplyKeyboardRemove())
         # Рассылка уведомлений всем consented пользователям
         asyncio.create_task(send_new_event_notification(data['date'], data['time'], data['location'], data['description']))
         logger.info(f"Админ {message.from_user.id} добавил мероприятие: {data['description']}")

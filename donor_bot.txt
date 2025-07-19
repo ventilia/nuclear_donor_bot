@@ -795,3 +795,101 @@ KeyError: 'phone'
 2025-07-19 10:15:11,359 - INFO - Update id=988082422 is handled. Duration 1530 ms by bot id=7893139526
 2025-07-19 10:15:17,379 - INFO - Пользователь 1653833795 принял согласие (ознакомление с PDF и /info)
 2025-07-19 10:15:17,462 - INFO - Update id=988082423 is handled. Duration 202 ms by bot id=7893139526
+2025-07-19 10:28:28,791 - INFO - Polling stopped
+2025-07-19 10:28:28,793 - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-07-19 10:28:28,793 - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 7893139526)
+2025-07-19 10:28:29,046 - INFO - Polling stopped for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 10:28:35,658 - INFO - База данных успешно инициализирована
+2025-07-19 10:28:35,658 - INFO - Начало импорта данных из Excel
+2025-07-19 10:28:35,698 - INFO - Таблица users не пуста, пропуск импорта
+2025-07-19 10:28:35,699 - INFO - Start polling
+2025-07-19 10:28:36,739 - INFO - Run polling for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 10:28:50,646 - INFO - Polling stopped
+2025-07-19 10:28:50,647 - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-07-19 10:28:50,648 - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 7893139526)
+2025-07-19 10:28:50,905 - INFO - Polling stopped for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 10:28:57,580 - INFO - База данных успешно инициализирована
+2025-07-19 10:28:57,581 - INFO - Начало импорта данных из Excel
+2025-07-19 10:28:57,617 - INFO - Таблица users не пуста, пропуск импорта
+2025-07-19 10:28:57,618 - INFO - Start polling
+2025-07-19 10:28:58,136 - INFO - Run polling for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 10:28:58,547 - INFO - Пользователь 1653833795 вызвал команду /start
+2025-07-19 10:28:59,589 - INFO - Update id=988082424 is handled. Duration 1046 ms by bot id=7893139526
+2025-07-19 10:29:00,950 - INFO - Пользователь 1653833795 принял согласие (ознакомление с PDF и /info)
+2025-07-19 10:29:01,039 - INFO - Update id=988082425 is handled. Duration 219 ms by bot id=7893139526
+2025-07-19 10:29:03,656 - INFO - Найден существующий пользователь с телефоном +79154316778
+2025-07-19 10:29:03,656 - INFO - Update id=988082426 is handled. Duration 92 ms by bot id=7893139526
+2025-07-19 10:29:04,996 - INFO - Успешная авторизация пользователя +79154316778
+2025-07-19 10:29:05,114 - INFO - Update id=988082427 is handled. Duration 405 ms by bot id=7893139526
+2025-07-19 10:29:07,928 - INFO - Update id=988082428 is handled. Duration 125 ms by bot id=7893139526
+2025-07-19 10:29:13,796 - ERROR - Ошибка при отправке вопроса от 1653833795: Telegram server says - Bad Request: chat not found
+2025-07-19 10:29:13,894 - INFO - Update id=988082429 is handled. Duration 282 ms by bot id=7893139526
+2025-07-19 10:33:54,433 - INFO - Пользователь 1653833795 вызвал команду /start
+2025-07-19 10:33:54,983 - INFO - Update id=988082430 is handled. Duration 546 ms by bot id=7893139526
+2025-07-19 10:34:02,251 - INFO - Админ 1653833795 запросил список админских команд
+2025-07-19 10:34:02,251 - INFO - Update id=988082431 is handled. Duration 171 ms by bot id=7893139526
+2025-07-19 10:34:09,310 - INFO - Админ 1653833795 начал добавление мероприятия
+2025-07-19 10:34:09,310 - INFO - Update id=988082432 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 10:34:15,213 - INFO - Update id=988082433 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 10:34:19,311 - INFO - Update id=988082434 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 10:34:25,418 - INFO - Update id=988082435 is handled. Duration 266 ms by bot id=7893139526
+2025-07-19 10:34:27,402 - INFO - Update id=988082436 is handled. Duration 92 ms by bot id=7893139526
+2025-07-19 10:34:29,032 - INFO - Админ 1653833795 добавил мероприятие: ffkfkf
+2025-07-19 10:34:29,033 - INFO - Update id=988082437 is handled. Duration 92 ms by bot id=7893139526
+2025-07-19 10:34:29,127 - INFO - Рассылка о новом мероприятии завершена
+2025-07-19 10:39:06,419 - INFO - Polling stopped
+2025-07-19 10:39:06,421 - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-07-19 10:39:06,421 - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 7893139526)
+2025-07-19 10:39:06,687 - INFO - Polling stopped for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 10:39:14,564 - INFO - База данных успешно инициализирована
+2025-07-19 10:39:14,564 - INFO - Начало импорта данных из Excel
+2025-07-19 10:39:14,602 - INFO - Таблица users не пуста, пропуск импорта
+2025-07-19 10:39:14,602 - INFO - Start polling
+2025-07-19 10:39:15,680 - INFO - Run polling for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 10:39:27,839 - INFO - Polling stopped
+2025-07-19 10:39:27,840 - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-07-19 10:39:27,841 - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 7893139526)
+2025-07-19 10:39:28,099 - INFO - Polling stopped for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 10:39:34,350 - INFO - База данных успешно инициализирована
+2025-07-19 10:39:34,350 - INFO - Начало импорта данных из Excel
+2025-07-19 10:39:34,388 - INFO - Таблица users не пуста, пропуск импорта
+2025-07-19 10:39:34,388 - INFO - Start polling
+2025-07-19 10:39:34,887 - INFO - Run polling for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 10:39:36,199 - INFO - Пользователь 1653833795 вызвал команду /start
+2025-07-19 10:39:37,390 - INFO - Update id=988082438 is handled. Duration 1188 ms by bot id=7893139526
+2025-07-19 10:39:39,730 - INFO - Пользователь 1653833795 принял согласие (ознакомление с PDF и /info)
+2025-07-19 10:39:39,801 - INFO - Update id=988082439 is handled. Duration 155 ms by bot id=7893139526
+2025-07-19 10:39:41,784 - INFO - Найден существующий пользователь с телефоном +79154316778
+2025-07-19 10:39:41,784 - INFO - Update id=988082440 is handled. Duration 202 ms by bot id=7893139526
+2025-07-19 10:39:43,394 - INFO - Успешная авторизация пользователя +79154316778
+2025-07-19 10:39:43,467 - INFO - Update id=988082441 is handled. Duration 250 ms by bot id=7893139526
+2025-07-19 10:39:48,918 - INFO - Админ 1653833795 запросил список админских команд
+2025-07-19 10:39:48,919 - INFO - Update id=988082442 is handled. Duration 109 ms by bot id=7893139526
+2025-07-19 10:39:50,965 - INFO - Update id=988082443 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 10:39:53,091 - INFO - Update id=988082444 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 10:39:55,089 - INFO - Update id=988082445 is handled. Duration 171 ms by bot id=7893139526
+2025-07-19 10:39:56,955 - INFO - Админ 1653833795 отправил рассылку: дааддада...
+2025-07-19 10:39:57,060 - INFO - Update id=988082446 is handled. Duration 453 ms by bot id=7893139526
+2025-07-19 10:40:00,839 - INFO - Update id=988082447 is not handled. Duration 0 ms by bot id=7893139526
+2025-07-19 10:40:10,692 - INFO - Админ 1653833795 запросил список админских команд
+2025-07-19 10:40:10,692 - INFO - Update id=988082448 is handled. Duration 78 ms by bot id=7893139526
+2025-07-19 10:40:23,964 - INFO - Пользователь 1653833795 вызвал команду /help
+2025-07-19 10:40:23,965 - INFO - Update id=988082449 is handled. Duration 155 ms by bot id=7893139526
+2025-07-19 10:40:27,009 - INFO - Update id=988082450 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 10:40:29,299 - ERROR - Ошибка при отправке уведомления админу 123456789: Telegram server says - Bad Request: chat not found
+2025-07-19 10:40:29,581 - INFO - Пользователь 1653833795 задал вопрос: uffuuff
+2025-07-19 10:40:29,581 - INFO - Update id=988082451 is handled. Duration 578 ms by bot id=7893139526
+2025-07-19 10:40:32,856 - INFO - Update id=988082452 is handled. Duration 92 ms by bot id=7893139526
+2025-07-19 10:40:35,372 - INFO - Update id=988082453 is handled. Duration 171 ms by bot id=7893139526
+2025-07-19 10:40:48,388 - INFO - Update id=988082454 is handled. Duration 328 ms by bot id=7893139526
+2025-07-19 10:40:53,112 - INFO - Админ 1191457973 ответил на вопрос 2
+2025-07-19 10:40:53,112 - INFO - Update id=988082455 is handled. Duration 186 ms by bot id=7893139526
+2025-07-19 10:41:00,048 - INFO - Пользователь 1653833795 запросил регистрацию на мероприятие
+2025-07-19 10:41:00,048 - INFO - Update id=988082456 is handled. Duration 125 ms by bot id=7893139526
+2025-07-19 10:41:01,396 - INFO - Пользователь 1653833795 зарегистрирован на мероприятие 1
+2025-07-19 10:41:01,470 - INFO - Update id=988082457 is handled. Duration 77 ms by bot id=7893139526
+2025-07-19 10:41:05,037 - INFO - Пользователь 1653833795 запросил просмотр профиля
+2025-07-19 10:41:05,037 - INFO - Update id=988082458 is handled. Duration 188 ms by bot id=7893139526
+2025-07-19 10:41:06,296 - INFO - Пользователь 1653833795 отменил регистрацию на мероприятие 1, запрошенная причина
+2025-07-19 10:41:06,297 - INFO - Update id=988082459 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 10:41:10,812 - INFO - Update id=988082460 is handled. Duration 265 ms by bot id=7893139526
