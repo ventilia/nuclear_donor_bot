@@ -32,14 +32,18 @@ class CancelReasonState(StatesGroup):
     reason = State()
 
 class BroadcastState(StatesGroup):
+    filter = State()
     text = State()
     photo = State()
     confirm = State()
 
-class AddAdminState(StatesGroup):  # Новое состояние для добавления админа
+class AddAdminState(StatesGroup):
     telegram_id = State()
     confirm = State()
 
-class RestoreState(StatesGroup):  # Новое состояние для восстановления бекапа
+class RestoreState(StatesGroup):
     file = State()
     confirm = State()
+
+class AttendanceState(StatesGroup):
+    file = State()

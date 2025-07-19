@@ -6,16 +6,17 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardMarkup, KeyboardButton
 
-from src.states.states import AddEventStates, BroadcastState, AnswerQuestionState, AddAdminState, RestoreState
+from src.states.states import AddEventStates, BroadcastState, AnswerQuestionState, AddAdminState, RestoreState, \
+    AttendanceState
 from src.database.db import get_admin_stats, get_pending_users, update_profile_status, get_telegram_id_by_user_id, \
     get_connection, get_user_registrations_count, add_donation, update_dkm, get_user_by_fio, \
-    get_donations_count_by_center, get_last_donation
+    get_donations_count_by_center, get_last_donation, get_registrations_by_event
 from src.database.db import add_event, get_consented_users_telegram_ids, get_all_events, get_registrations_count
 from src.database.db import get_attended_count, get_event_status, update_event_status, get_user_by_id, get_users_paginated
 from src.database.db import delete_user_by_id, get_all_users_for_export, add_question, get_unanswered_questions
 from src.database.db import mark_question_answered, get_user_telegram_id, import_from_excel, export_users_to_excel, import_users_from_excel
 from src.utils.keyboards import is_admin
-from src.database.db import logger, add_admin
+from src.database.db import logger, add_admin, delete_event, get_users_by_category, get_event_by_date, update_attended
 import openpyxl
 
 admin_router = Router()
@@ -204,12 +205,27 @@ async def broadcast_handler(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         await message.answer("Нет прав. ⚠️")
         return
+    # Добавляем выбор фильтра перед текстом
+    await state.set_state(BroadcastState.filter)
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Всем пользователям", callback_data="broadcast_filter_all")
+    keyboard.button(text="Только админам", callback_data="broadcast_filter_admins")
+    keyboard.button(text="Только студентам", callback_data="broadcast_filter_student")
+    keyboard.button(text="Только сотрудникам", callback_data="broadcast_filter_employee")
+    keyboard.button(text="Только внешним", callback_data="broadcast_filter_external")
+    await message.answer("Выберите фильтр для рассылки:", reply_markup=keyboard.as_markup())
+
+@admin_router.callback_query(lambda c: c.data.startswith('broadcast_filter_'), BroadcastState.filter)
+async def process_broadcast_filter(callback_query: types.CallbackQuery, state: FSMContext):
+    filter_type = callback_query.data.split('_')[-1]
+    await state.update_data(filter=filter_type)
     await state.set_state(BroadcastState.text)
     keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Назад 🔙")]],
         resize_keyboard=True
     )
-    await message.answer("Введите текст для рассылки всем пользователям:", reply_markup=keyboard)
+    await callback_query.message.answer("Введите текст для рассылки:", reply_markup=keyboard)
+    await callback_query.answer()
 
 @admin_router.message(BroadcastState.text)
 async def process_broadcast_text(message: types.Message, state: FSMContext):
@@ -268,8 +284,9 @@ async def confirm_broadcast(callback_query: types.CallbackQuery, state: FSMConte
     data = await state.get_data()
     text = data.get('text')
     photo = data.get('photo')
+    filter_type = data.get('filter')
     try:
-        users = get_consented_users_telegram_ids()
+        users = get_users_by_category(filter_type)
         sent_count = 0
         for tg_id in users:
             try:
@@ -281,9 +298,9 @@ async def confirm_broadcast(callback_query: types.CallbackQuery, state: FSMConte
             except Exception as e:
                 logger.warning(f"Ошибка отправки рассылки пользователю {tg_id}: {e}")
         await callback_query.message.answer(f"Рассылка завершена. Отправлено {sent_count} пользователям.")
-        logger.info(f"Админ {callback_query.from_user.id} отправил рассылку: {text[:50]}...")
+        logger.info(f"Админ {callback_query.from_user.id} отправил рассылку (фильтр: {filter_type}): {text[:50]}...")
     except Exception as e:
-        logger.error(f"Ошибка при рассылке: {e}")
+        logger.error(f"Ошибка при рассылке (фильтр: {filter_type}): {e}")
         await callback_query.message.answer("Произошла ошибка при рассылке.")
     await state.clear()
     await callback_query.answer()
@@ -370,10 +387,11 @@ async def admin_help_handler(message: types.Message):
                          "/upload_stats - Загрузить статистику из Excel\n"
                          "/export_stats - Выгрузить статистику в Excel\n"
                          "/answer - Ответить на вопросы пользователей\n"
-                         "/broadcast - Рассылка сообщений всем пользователям\n"
+                         "/broadcast - Рассылка сообщений \n"
                          "/add_admin - Добавить админа\n"
                          "/backup_users - Бэкап пользователей\n"
                          "/restore_users - Восстановление пользователей из бэкапа\n"
+                         "/upload_attendance - Загрузить посещаемость мероприятия\n"
                          "/help - Список пользовательских команд")
     logger.info(f"Админ {message.from_user.id} запросил список админских команд")
 
@@ -526,6 +544,7 @@ async def stats_event_handler(message: types.Message):
             keyboard = InlineKeyboardBuilder()
             keyboard.button(text="Заморозить ❄️" if event[5] == 'active' else "Разморозить 🔥",
                             callback_data=f"toggle_{event[0]}")
+            keyboard.button(text="Удалить ❌", callback_data=f"delete_event_{event[0]}")
             await message.answer(f"Мероприятие: {event[1]} {event[2]} - {event[3]} 📅\n"
                                  f"Вместимость: {event[4]} 👥\nЗарегистрировано: {reg_count} 📝\nДоноров: {donors_count} 💉\nСтатус: {event[5]} ⚙️",
                                  reply_markup=keyboard.as_markup())
@@ -546,6 +565,18 @@ async def toggle_event(callback_query: types.CallbackQuery):
     except Exception as e:
         logger.error(f"Ошибка при изменении статуса мероприятия {event_id}: {e}")
         await callback_query.answer("Произошла ошибка. Попробуйте позже. ⚠️")
+
+@admin_router.callback_query(lambda c: c.data.startswith('delete_event_'))
+async def process_delete_event(callback_query: types.CallbackQuery):
+    event_id = int(callback_query.data.split('_')[2])
+    try:
+        delete_event(event_id)
+        await callback_query.message.answer("Мероприятие удалено. ✅")
+        logger.info(f"Админ {callback_query.from_user.id} удалил мероприятие ID {event_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при удалении мероприятия ID {event_id}: {e}")
+        await callback_query.message.answer("Произошла ошибка при удалении. ⚠️")
+    await callback_query.answer()
 
 @admin_router.message(Command(commands=['see_profile']))
 async def see_profile_handler(message: types.Message):
@@ -602,7 +633,7 @@ async def show_profiles(message: types.Message, offset: int):
             pagination_keyboard.button(text="Назад ⬅️", callback_data=f"prev_{offset - 5}")
         if len(users) == 5:
             pagination_keyboard.button(text="Вперед ➡️", callback_data=f"next_{offset + 5}")
-        pagination_markup = pagination_keyboard.as_markup() if pagination_keyboard.inline_keyboard else None
+        pagination_markup = pagination_keyboard.as_markup() if pagination_keyboard.row() else None  # Исправление: row() генерирует inline_keyboard
         for user in users:
             reg_count = get_user_registrations_count(user[0])
             text = f"{user[1]}, Группа: {user[2]}, (ID: {user[0]}), Регистраций: {reg_count} 📝"
@@ -704,21 +735,112 @@ async def process_upload_stats(message: types.Message):
         sheet = wb.active
         for row in sheet.iter_rows(min_row=2, values_only=True):
             fio = str(row[0]).strip()
-            date = str(row[5]) if row[5] else None
-            center = 'Гаврилова' if row[2] else 'ФМБА' if row[3] else None
-            if not center or not date:
+            date = str(row[1]) if len(row) > 1 else None
+            center = str(row[2]) if len(row) > 2 else None
+            if not fio or not date or not center:
                 continue
+            user = get_user_by_fio(fio)
+            if not user:
+                # Создаём нового, если не найден
+                with get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''INSERT INTO users 
+                        (fio, category, profile_status)
+                        VALUES (?, 'unknown', 'approved')''', (fio,))
+                    user_id = cursor.lastrowid
+                    conn.commit()
+                logger.info(f"Создан новый пользователь по ФИО {fio} для дозаписи статистики")
+            else:
+                user_id = user[0]
+            add_donation(user_id, date, center)
+        await message.answer("Статистика загружена и БД обновлена (добавлены новые пользователи при необходимости). ✅")
+        logger.info(f"Админ {message.from_user.id} загрузил статистику из Excel с дозаписью пользователей")
+    except Exception as e:
+        await message.answer(f"Ошибка при загрузке: {str(e)} ⚠️")
+        logger.error(f"Ошибка загрузки stats Excel: {e}")
+
+@admin_router.message(Command(commands=['upload_attendance']))
+async def upload_attendance_handler(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await message.answer("Нет прав. ⚠️")
+        return
+    await state.set_state(AttendanceState.file)
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Назад 🔙")]],
+        resize_keyboard=True
+    )
+    await message.answer("Отправьте файл Excel с посещаемостью (ФИО, Дата, ЦК). 📂", reply_markup=keyboard)
+
+@admin_router.message(AttendanceState.file)
+async def process_upload_attendance(message: types.Message, state: FSMContext):
+    # Локальный импорт bot
+    from src.bot import bot
+    if message.text == "Назад 🔙":
+        await state.clear()
+        await message.answer("Загрузка отменена.", reply_markup=types.ReplyKeyboardRemove())
+        return
+    if not message.document or not message.document.file_name.endswith('.xlsx'):
+        await message.answer("Отправьте файл Excel (.xlsx). ⚠️")
+        return
+    try:
+        file_id = message.document.file_id
+        file = await bot.get_file(file_id)
+        file_path = file.file_path
+        await bot.download_file(file_path, "temp_attendance.xlsx")
+        wb = openpyxl.load_workbook('temp_attendance.xlsx')
+        sheet = wb.active
+        date = None
+        attended_fios = set()
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            fio = str(row[0]).strip() if row[0] else ''
+            row_date = str(row[1]) if len(row) > 1 else None
+            center = str(row[2]) if len(row) > 2 else None
+            if not fio or not row_date or not center:
+                continue
+            if date is None:
+                date = row_date  # Берем дату из первой строки
+            elif row_date != date:
+                await message.answer("Даты в файле отличаются. Используйте файл с одной датой. ⚠️")
+                return
+            attended_fios.add(fio)
             user = get_user_by_fio(fio)
             if user:
                 user_id = user[0]
                 add_donation(user_id, date, center)
-                if len(row) > 9 and row[9]:
-                    update_dkm(user_id, 1)
-        await message.answer("Статистика загружена и БД обновлена. ✅")
-        logger.info(f"Админ {message.from_user.id} загрузил статистику из Excel")
+                # Отметить attended для registrations на событие по дате
+                event_id = get_event_by_date(date)
+                if event_id:
+                    cursor = get_connection().cursor()
+                    cursor.execute('SELECT id FROM registrations WHERE user_id = ? AND event_id = ?', (user_id, event_id))
+                    reg_id = cursor.fetchone()
+                    if reg_id:
+                        update_attended(reg_id[0])
+        if date:
+            event_id = get_event_by_date(date)
+            if event_id:
+                # Для всех зарегистрированных на событие
+                registrations = get_registrations_by_event(event_id)  # Новая функция, добавить в db.py
+                for reg in registrations:
+                    reg_id = reg[0]
+                    user_id = reg[1]
+                    telegram_id = get_user_telegram_id(user_id)
+                    if telegram_id:
+                        if get_user_by_id(user_id)[3] in attended_fios:  # Пришли
+                            await bot.send_message(telegram_id, "Спасибо, что пришли на мероприятие! Просьба написать отзыв. 📝")
+                            logger.info(f"Отправлен запрос отзыва пользователю {telegram_id} для события {event_id}")
+                        else:  # Не пришли
+                            keyboard = InlineKeyboardBuilder()
+                            keyboard.button(text="Медотвод ⚕️", callback_data=f"reason_med_{reg_id}")
+                            keyboard.button(text="Личные причины 👤", callback_data=f"reason_personal_{reg_id}")
+                            keyboard.button(text="Не захотел 😔", callback_data=f"reason_no_{reg_id}")
+                            await bot.send_message(telegram_id, "Вы зарегистрировались на мероприятие, но не пришли. Укажите причину: ❓", reply_markup=keyboard.as_markup())
+                            logger.info(f"Отправлен опрос неявки пользователю {telegram_id} для reg {reg_id}")
+        await message.answer("Посещаемость загружена, донации добавлены, уведомления отправлены. ✅")
+        logger.info(f"Админ {message.from_user.id} загрузил посещаемость из Excel")
+        await state.clear()
     except Exception as e:
         await message.answer(f"Ошибка при загрузке: {str(e)} ⚠️")
-        logger.error(f"Ошибка загрузки stats Excel: {e}")
+        logger.error(f"Ошибка загрузки attendance Excel: {e}")
 
 @admin_router.message(Command(commands=['export_stats']))
 async def export_stats_handler(message: types.Message):

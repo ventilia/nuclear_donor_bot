@@ -519,3 +519,98 @@ client_session: <aiohttp.client.ClientSession object at 0x0000023B890B91C0>
 2025-07-19 13:40:18,751 - INFO - Update id=988082545 is handled. Duration 890 ms by bot id=7893139526
 2025-07-19 13:40:19,799 - INFO - Профиль пользователя ID 358 approved админом 1653833795
 2025-07-19 13:40:19,904 - INFO - Update id=988082546 is handled. Duration 342 ms by bot id=7893139526
+2025-07-19 13:41:24,624 - INFO - Админ 1653833795 запросил список админских команд
+2025-07-19 13:41:24,625 - INFO - Update id=988082547 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 13:41:54,220 - INFO - Пользователь 1653833795 вызвал команду /help
+2025-07-19 13:41:54,221 - INFO - Update id=988082548 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 13:43:33,019 - INFO - Админ 1653833795 запросил список админских команд
+2025-07-19 13:43:33,019 - INFO - Update id=988082549 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 13:43:35,299 - INFO - Update id=988082550 is handled. Duration 0 ms by bot id=7893139526
+2025-07-19 13:43:44,015 - INFO - Update id=988082551 is handled. Duration 0 ms by bot id=7893139526
+2025-07-19 13:43:48,367 - INFO - Админ 1653833795 запросил статистику
+2025-07-19 13:43:48,367 - INFO - Update id=988082552 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 13:43:52,348 - ERROR - Ошибка при получении списка профилей: 'InlineKeyboardBuilder' object has no attribute 'inline_keyboard'
+2025-07-19 13:43:52,543 - INFO - Update id=988082553 is handled. Duration 203 ms by bot id=7893139526
+2025-07-19 13:44:47,794 - INFO - Нет заявок на модерацию
+2025-07-19 13:44:47,794 - INFO - Update id=988082554 is handled. Duration 109 ms by bot id=7893139526
+2025-07-19 13:44:50,020 - INFO - Админ 1653833795 запросил статистику
+2025-07-19 13:44:50,021 - INFO - Update id=988082555 is handled. Duration 125 ms by bot id=7893139526
+2025-07-19 13:44:54,529 - INFO - Админ 1653833795 начал добавление мероприятия
+2025-07-19 13:44:54,529 - INFO - Update id=988082556 is handled. Duration 92 ms by bot id=7893139526
+2025-07-19 13:45:00,369 - INFO - Update id=988082557 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 13:45:03,078 - INFO - Update id=988082558 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 13:45:05,681 - INFO - Update id=988082559 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 13:45:07,620 - INFO - Update id=988082560 is handled. Duration 108 ms by bot id=7893139526
+2025-07-19 13:45:09,237 - INFO - Админ 1653833795 добавил мероприятие: тут
+2025-07-19 13:45:09,237 - INFO - Update id=988082561 is handled. Duration 92 ms by bot id=7893139526
+2025-07-19 13:45:09,243 - INFO - Рассылка о новом мероприятии завершена
+2025-07-19 13:45:13,796 - INFO - Админ 1653833795 запросил статистику мероприятия ID 1
+2025-07-19 13:45:13,796 - INFO - Update id=988082562 is handled. Duration 109 ms by bot id=7893139526
+2025-07-19 13:45:41,670 - INFO - Админ 1653833795 выгрузил статистику
+2025-07-19 13:45:41,671 - INFO - Update id=988082563 is handled. Duration 2813 ms by bot id=7893139526
+2025-07-19 13:45:51,663 - INFO - Update id=988082564 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 13:48:33,520 - ERROR - Ошибка при получении списка профилей: 'InlineKeyboardBuilder' object has no attribute 'inline_keyboard'
+2025-07-19 13:48:33,628 - INFO - Update id=988082565 is handled. Duration 108 ms by bot id=7893139526
+2025-07-19 13:48:37,818 - INFO - Админ 1653833795 запросил детали профиля по ID 5
+2025-07-19 13:48:37,818 - INFO - Update id=988082566 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 14:13:34,289 - INFO - Polling stopped
+2025-07-19 14:13:34,290 - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-07-19 14:13:34,290 - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 7893139526)
+2025-07-19 14:13:34,556 - INFO - Polling stopped for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 14:13:34,687 - ERROR - Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x000001BFC67B1280>
+2025-07-19 14:13:39,100 - INFO - База данных успешно инициализирована
+2025-07-19 14:13:39,100 - INFO - Начало импорта данных из Excel
+2025-07-19 14:13:39,143 - INFO - Таблица users не пуста, пропуск импорта
+2025-07-19 14:13:39,143 - INFO - Start polling
+2025-07-19 14:13:40,243 - INFO - Run polling for bot @DonorSearchByVent_bot id=7893139526 - 'DonorSearch'
+2025-07-19 14:13:55,631 - INFO - Пользователь 1653833795 вызвал команду /start
+2025-07-19 14:13:57,591 - INFO - Update id=988082567 is handled. Duration 2265 ms by bot id=7893139526
+2025-07-19 14:14:00,317 - INFO - Пользователь 1653833795 принял согласие (ознакомление с PDF и /info)
+2025-07-19 14:14:00,533 - INFO - Update id=988082568 is handled. Duration 452 ms by bot id=7893139526
+2025-07-19 14:14:02,957 - INFO - Найден существующий пользователь с телефоном +79154316778
+2025-07-19 14:14:02,958 - INFO - Update id=988082569 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 14:14:07,492 - INFO - Пользователь +79154316778 должен подтвердить согласие (с PDF и /info)
+2025-07-19 14:14:07,575 - INFO - Update id=988082570 is handled. Duration 561 ms by bot id=7893139526
+2025-07-19 14:14:09,611 - INFO - Пользователь 1653833795 принял согласие (ознакомление с PDF и /info)
+2025-07-19 14:14:09,699 - INFO - Update id=988082571 is handled. Duration 186 ms by bot id=7893139526
+2025-07-19 14:14:11,459 - INFO - Найден существующий пользователь с телефоном +79154316778
+2025-07-19 14:14:11,459 - INFO - Update id=988082572 is handled. Duration 109 ms by bot id=7893139526
+2025-07-19 14:14:12,584 - INFO - Пользователь +79154316778 должен подтвердить согласие (с PDF и /info)
+2025-07-19 14:14:12,700 - INFO - Update id=988082573 is handled. Duration 405 ms by bot id=7893139526
+2025-07-19 14:14:22,082 - INFO - Пользователь 1653833795 отказался от согласия
+2025-07-19 14:14:22,276 - INFO - Update id=988082574 is handled. Duration 375 ms by bot id=7893139526
+2025-07-19 14:14:25,417 - INFO - Пользователь 1653833795 вызвал команду /start
+2025-07-19 14:14:26,159 - INFO - Update id=988082575 is handled. Duration 733 ms by bot id=7893139526
+2025-07-19 14:14:28,081 - INFO - Пользователь 1653833795 принял согласие (ознакомление с PDF и /info)
+2025-07-19 14:14:28,208 - INFO - Update id=988082576 is handled. Duration 219 ms by bot id=7893139526
+2025-07-19 14:14:30,931 - INFO - Найден существующий пользователь с телефоном +79154316778
+2025-07-19 14:14:30,931 - INFO - Update id=988082577 is handled. Duration 171 ms by bot id=7893139526
+2025-07-19 14:14:31,818 - INFO - Пользователь 7893139526 начал регистрацию профиля
+2025-07-19 14:14:31,900 - INFO - Update id=988082578 is handled. Duration 202 ms by bot id=7893139526
+2025-07-19 14:14:35,986 - WARNING - Некорректное ФИО от пользователя 1653833795: F
+2025-07-19 14:14:35,986 - INFO - Update id=988082579 is handled. Duration 92 ms by bot id=7893139526
+2025-07-19 14:14:37,721 - INFO - Update id=988082580 is handled. Duration 125 ms by bot id=7893139526
+2025-07-19 14:14:40,826 - INFO - Пользователь 1653833795 выбрал категорию: student
+2025-07-19 14:14:40,826 - INFO - Update id=988082581 is handled. Duration 186 ms by bot id=7893139526
+2025-07-19 14:14:45,394 - INFO - Update id=988082582 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 14:14:47,846 - INFO - Обновлен профиль для телефона +79154316778, отправлен на модерацию
+2025-07-19 14:14:48,024 - INFO - Update id=988082583 is handled. Duration 186 ms by bot id=7893139526
+2025-07-19 14:14:55,545 - INFO - Админ 1653833795 запросил список админских команд
+2025-07-19 14:14:55,545 - INFO - Update id=988082584 is handled. Duration 155 ms by bot id=7893139526
+2025-07-19 14:15:00,473 - INFO - Отображена заявка пользователя F F F для админа 1653833795
+2025-07-19 14:15:00,473 - INFO - Update id=988082585 is handled. Duration 125 ms by bot id=7893139526
+2025-07-19 14:15:01,912 - INFO - Профиль пользователя ID 358 approved админом 1653833795
+2025-07-19 14:15:01,993 - INFO - Update id=988082586 is handled. Duration 765 ms by bot id=7893139526
+2025-07-19 14:15:18,942 - INFO - Админ 1653833795 запросил список админских команд
+2025-07-19 14:15:18,943 - INFO - Update id=988082587 is handled. Duration 125 ms by bot id=7893139526
+2025-07-19 14:15:22,825 - INFO - Админ 1653833795 запросил список профилей, offset: 0
+2025-07-19 14:15:22,825 - INFO - Update id=988082588 is handled. Duration 953 ms by bot id=7893139526
+2025-07-19 14:15:39,553 - INFO - Update id=988082589 is handled. Duration 94 ms by bot id=7893139526
+2025-07-19 14:16:38,814 - INFO - Нет заявок на модерацию
+2025-07-19 14:16:38,814 - INFO - Update id=988082590 is handled. Duration 171 ms by bot id=7893139526
+2025-07-19 14:16:41,697 - INFO - Админ 1653833795 запросил статистику мероприятия ID 1
+2025-07-19 14:16:41,697 - INFO - Update id=988082591 is handled. Duration 109 ms by bot id=7893139526
+2025-07-19 14:16:42,861 - INFO - Удалено событие ID 1
+2025-07-19 14:16:42,959 - INFO - Админ 1653833795 удалил мероприятие ID 1
+2025-07-19 14:16:43,036 - INFO - Update id=988082592 is handled. Duration 171 ms by bot id=7893139526

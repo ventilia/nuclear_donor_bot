@@ -515,3 +515,54 @@ def import_users_from_excel(filename):
     except Exception as e:
         logger.error(f"Ошибка импорта пользователей из {filename}: {e}")
         raise
+
+# Функция для удаления события
+def delete_event(event_id):
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # Удаление связанных записей
+            cursor.execute('DELETE FROM registrations WHERE event_id = ?', (event_id,))
+            cursor.execute('DELETE FROM reminders WHERE event_id = ?', (event_id,))
+            cursor.execute('DELETE FROM non_attendance WHERE registration_id IN (SELECT id FROM registrations WHERE event_id = ?)', (event_id,))
+            # Удаление события
+            cursor.execute('DELETE FROM events WHERE id = ?', (event_id,))
+            conn.commit()
+        logger.info(f"Удалено событие ID {event_id}")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при удалении события ID {event_id}: {e}")
+        raise
+
+# Функция для получения Telegram ID по категории
+def get_users_by_category(category=None):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if category == 'admins':
+            cursor.execute('SELECT telegram_id FROM admins')
+        elif category:
+            cursor.execute('SELECT telegram_id FROM users WHERE category = ? AND consent = 1', (category,))
+        else:  # Всем пользователям
+            cursor.execute('SELECT telegram_id FROM users WHERE consent = 1')
+        return [row[0] for row in cursor.fetchall() if row[0] is not None]
+
+# Функция для получения события по дате
+def get_event_by_date(date):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM events WHERE date = ?', (date,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+# Функция для обновления attended в registrations
+def update_attended(reg_id, attended=1):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE registrations SET attended = ? WHERE id = ?', (attended, reg_id))
+        conn.commit()
+
+# Новая функция для получения всех регистраций по событию
+def get_registrations_by_event(event_id):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, user_id FROM registrations WHERE event_id = ?', (event_id,))
+        return cursor.fetchall()
