@@ -13,10 +13,10 @@ import openpyxl  # Для export_stats, но загрузка в db.py
 from db import (init_db, import_from_excel, get_user_by_phone, get_consent_by_phone, update_consent_by_phone,
                 save_or_update_user, get_profile_status_by_telegram_id, get_active_events, get_user_by_telegram_id,
                 get_donations_count_by_center, get_last_donation, get_donations_history, get_user_registrations,
-                get_user_registrations_count, get_info_section_text, get_admin_stats, get_pending_users,
+                get_user_registrations_count, get_admin_stats, get_pending_users,
                 update_profile_status, get_telegram_id_by_user_id, add_event, get_consented_users_telegram_ids,
                 get_all_events, get_registrations_count, get_attended_count, get_event_status, update_event_status,
-                get_user_by_id, get_users_paginated, delete_user_by_id, update_info_section, get_all_users_for_export,
+                get_user_by_id, get_users_paginated, delete_user_by_id, get_all_users_for_export,
                 get_reminders_to_send, get_event_by_id, delete_reminder, get_past_events, get_non_attended_registrations,
                 add_non_attendance_reason, get_user_id_by_telegram_id, get_event_capacity, get_registrations_count as get_event_reg_count,
                 get_event_date, add_registration, add_reminder, cancel_registration, add_donation, update_dkm,
@@ -70,13 +70,42 @@ async def start_handler(message: types.Message, state: FSMContext):
     except FileNotFoundError:
         logger.warning("Файл 'frame 3.jpg' не найден, баннер не отправлен")
         await message.answer("Добро пожаловать в бот Дня Донора МИФИ! 💉❤️")
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Поделиться номером телефона 📞", request_contact=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await message.answer("Привет! Я бот донорского центра МИФИ. Поделись номером телефона для авторизации. 🔑", reply_markup=keyboard)
-    await state.set_state(ProfilRegStates.phone_confirm)
+    # Отправка PDF с политикой конфиденциальности
+    try:
+        await bot.send_document(message.chat.id, types.FSInputFile('privacy_policy.pdf'), caption="Ознакомьтесь с пользовательским соглашением (политика конфиденциальности). 📄")
+    except FileNotFoundError:
+        logger.warning("Файл 'privacy_policy.pdf' не найден")
+        await message.answer("Файл с пользовательским соглашением не найден. Обратитесь к администратору. ⚠️")
+        return
+    except Exception as e:
+        logger.error(f"Ошибка при отправке PDF: {e}")
+        await message.answer("Произошла ошибка при отправке соглашения. Попробуйте позже. ⚠️")
+        return
+    # Запрос согласия с новой формулировкой
+    await state.set_state(ConsentStates.consent)
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Согласен ✅", callback_data="consent_yes")
+    keyboard.button(text="Нет ❌", callback_data="consent_no")
+    await message.answer("Я ознакомился с пользовательским соглашением и обязуюсь прочитать информацию из /info перед регистрацией на любое мероприятие. 📄",
+                         reply_markup=keyboard.as_markup())
+
+@dp.callback_query(lambda c: c.data in ['consent_yes', 'consent_no'], ConsentStates.consent)
+async def process_initial_consent(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.data == 'consent_yes':
+        await state.update_data(initial_consent=True)  # Флаг согласия для новых пользователей
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Поделиться номером телефона 📞", request_contact=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await callback_query.message.answer("Спасибо! Теперь поделитесь номером телефона для авторизации. 🔑", reply_markup=keyboard)
+        await state.set_state(ProfilRegStates.phone_confirm)
+        logger.info(f"Пользователь {callback_query.from_user.id} принял согласие (ознакомление с PDF и /info)")
+    else:
+        await callback_query.message.answer("Без согласия бот не может работать. До свидания. 👋")
+        await state.clear()
+        logger.info(f"Пользователь {callback_query.from_user.id} отказался от согласия")
+    await callback_query.answer()
 
 @dp.message(ProfilRegStates.phone_confirm)
 async def process_phone(message: types.Message, state: FSMContext):
@@ -109,16 +138,36 @@ async def confirm_existing(callback_query: types.CallbackQuery, state: FSMContex
         phone = data['phone']
         try:
             consent = get_consent_by_phone(phone)
-            if not consent:
+            if consent is None or not consent:
+                # Для импортированных (consent=0) или новых — отправляем PDF и запрашиваем согласие
+                try:
+                    await bot.send_document(callback_query.message.chat.id, types.FSInputFile('privacy_policy.pdf'), caption="Ознакомьтесь с пользовательским соглашением (политика конфиденциальности). 📄")
+                except FileNotFoundError:
+                    logger.warning("Файл 'privacy_policy.pdf' не найден")
+                    await callback_query.message.answer("Файл с пользовательским соглашением не найден. Обратитесь к администратору. ⚠️")
+                    return
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке PDF: {e}")
+                    await callback_query.message.answer("Произошла ошибка при отправке соглашения. Попробуйте позже. ⚠️")
+                    return
                 await state.set_state(ConsentStates.consent)
                 keyboard = InlineKeyboardBuilder()
                 keyboard.button(text="Согласен ✅", callback_data="consent_yes")
                 keyboard.button(text="Нет ❌", callback_data="consent_no")
-                await callback_query.message.answer("Примите условия: согласие на обработку ПДн и рассылки. 📄",
+                await callback_query.message.answer("Я ознакомился с пользовательским соглашением и обязуюсь прочитать информацию из /info перед регистрацией на любое мероприятие. 📄",
                                                     reply_markup=keyboard.as_markup())
-                logger.info(f"Пользователь {phone} должен подтвердить согласие")
+                logger.info(f"Пользователь {phone} должен подтвердить согласие (с PDF и /info)")
             else:
                 await callback_query.message.answer("Авторизация успешна! 🎉")
+                # Отправка /help после успешной авторизации
+                help_text = ("Вот команды пользователя: 📋\n"
+                             "/profilReg - Зарегистрировать профиль ✍️\n"
+                             "/reg - Записаться на мероприятие 📅\n"
+                             "/profil - Посмотреть/изменить профиль 👤\n"
+                             "/stats - Моя статистика 📊\n"
+                             "/info - Информационные разделы 📖\n"
+                             "/help - Показать этот список ❓")
+                await callback_query.message.answer(help_text)
                 await state.clear()
                 logger.info(f"Успешная авторизация пользователя {phone}")
         except Exception as e:
@@ -128,18 +177,19 @@ async def confirm_existing(callback_query: types.CallbackQuery, state: FSMContex
         await profil_reg_handler(callback_query.message, state)
     await callback_query.answer()
 
-@dp.callback_query(lambda c: c.data in ['consent_yes', 'consent_no'])
+@dp.callback_query(lambda c: c.data in ['consent_yes', 'consent_no'], ConsentStates.consent)
 async def process_consent(callback_query: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    phone = data['phone']
+    phone = data.get('phone')
     try:
         if callback_query.data == 'consent_yes':
-            update_consent_by_phone(phone, 1)
+            if phone:
+                update_consent_by_phone(phone, 1)
             await callback_query.message.answer("Согласие принято! Авторизация успешна. 🎉")
-            logger.info(f"Пользователь {phone} принял согласие")
+            logger.info(f"Пользователь {phone or callback_query.from_user.id} принял согласие (ознакомление с PDF и /info)")
         else:
             await callback_query.message.answer("Без согласия бот не может работать. До свидания. 👋")
-            logger.info(f"Пользователь {phone} отказался от согласия")
+            logger.info(f"Пользователь {phone or callback_query.from_user.id} отказался от согласия")
         await state.clear()
     except Exception as e:
         logger.error(f"Ошибка при обновлении согласия для телефона {phone}: {e}")
@@ -354,23 +404,24 @@ async def info_handler(message: types.Message):
 @dp.callback_query(lambda c: c.data.startswith('info_'))
 async def process_info(callback_query: types.CallbackQuery):
     section_map = {
-        'blood': 'О донорстве крови',
-        'bone': 'О донорстве костного мозга',
-        'mifi': 'О донациях в МИФИ'
+        'blood': 'blood_donation.txt',
+        'bone': 'bone_marrow_donation.txt',
+        'mifi': 'mifi_donations.txt'
     }
-    section_name = section_map.get(callback_query.data.split('_')[1])
-    if not section_name:
+    file_name = section_map.get(callback_query.data.split('_')[1])
+    if not file_name:
         await callback_query.answer("Некорректный раздел. ⚠️")
         return
     try:
-        text = get_info_section_text(section_name)
-        if text:
-            await callback_query.message.answer(text)
-            logger.info(f"Пользователь {callback_query.from_user.id} просмотрел раздел '{section_name}'")
-        else:
-            await callback_query.message.answer("Текст раздела не найден. ⚠️")
+        with open(file_name, 'r', encoding='utf-8') as f:
+            text = f.read()
+        await callback_query.message.answer(text)
+        logger.info(f"Пользователь {callback_query.from_user.id} просмотрел раздел из {file_name}")
+    except FileNotFoundError:
+        await callback_query.message.answer("Текст раздела не найден. ⚠️")
+        logger.warning(f"Файл {file_name} не найден")
     except Exception as e:
-        logger.error(f"Ошибка при получении текста раздела '{section_name}': {e}")
+        logger.error(f"Ошибка при чтении файла {file_name}: {e}")
         await callback_query.message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
     await callback_query.answer()
 
@@ -425,6 +476,15 @@ async def process_profile_action(callback_query: types.CallbackQuery):
         telegram_id = get_telegram_id_by_user_id(user_id)
         if action == 'approve' and telegram_id is not None:  # Фикс бага: проверка на None перед отправкой
             await bot.send_message(telegram_id, "Ваш профиль был принят администратором. ✅")
+            # Отправка /help после approve
+            help_text = ("Вот команды пользователя: 📋\n"
+                         "/profilReg - Зарегистрировать профиль ✍️\n"
+                         "/reg - Записаться на мероприятие 📅\n"
+                         "/profil - Посмотреть/изменить профиль 👤\n"
+                         "/stats - Моя статистика 📊\n"
+                         "/info - Информационные разделы 📖\n"
+                         "/help - Показать этот список ❓")
+            await bot.send_message(telegram_id, help_text)
         logger.info(f"Профиль пользователя ID {user_id} {status} админом {callback_query.from_user.id}")
         await callback_query.answer(f"Профиль {'принят ✅' if action == 'approve' else 'отклонен ❌'}.")
     except Exception as e:
@@ -701,50 +761,6 @@ async def import_excel_handler(message: types.Message):
     except Exception as e:
         await message.answer(f"Ошибка при импорте данных: {str(e)} ⚠️")
         logger.error(f"Ошибка при импорте Excel админом {message.from_user.id}: {e}")
-
-@dp.message(Command(commands=['edit_info']))
-async def edit_info_handler(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.answer("Нет прав. ⚠️")
-        logger.warning(f"Пользователь {message.from_user.id} пытался редактировать инфо разделы")
-        return
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="О донорстве крови", callback_data="edit_blood")
-    keyboard.button(text="О донорстве костного мозга", callback_data="edit_bone")
-    keyboard.button(text="О донациях в МИФИ", callback_data="edit_mifi")
-    await message.answer("Выберите раздел для редактирования: ✏️", reply_markup=keyboard.as_markup())
-    await state.set_state(EditInfoStates.section)
-    logger.info(f"Админ {message.from_user.id} начал редактирование инфо разделов")
-
-@dp.callback_query(lambda c: c.data.startswith('edit_'))
-async def process_edit_section(callback_query: types.CallbackQuery, state: FSMContext):
-    section_map = {
-        'blood': 'О донорстве крови',
-        'bone': 'О донорстве костного мозга',
-        'mifi': 'О донациях в МИФИ'
-    }
-    section_name = section_map.get(callback_query.data.split('_')[1])
-    if not section_name:
-        await callback_query.answer("Некорректный раздел. ⚠️")
-        return
-    await state.update_data(section=section_name)
-    await callback_query.message.answer(f"Введите новый текст для раздела '{section_name}': ✏️")
-    await state.set_state(EditInfoStates.text)
-    await callback_query.answer()
-
-@dp.message(EditInfoStates.text)
-async def process_edit_text(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    section_name = data['section']
-    new_text = message.text.strip()
-    try:
-        update_info_section(section_name, new_text)
-        await message.answer(f"Текст раздела '{section_name}' обновлен. ✅")
-        logger.info(f"Админ {message.from_user.id} обновил текст раздела '{section_name}'")
-    except Exception as e:
-        logger.error(f"Ошибка при обновлении текста раздела '{section_name}': {e}")
-        await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
-    await state.clear()
 
 @dp.message(Command(commands=['upload_stats']))
 async def upload_stats_handler(message: types.Message):
