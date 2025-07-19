@@ -223,12 +223,13 @@ def get_user_by_phone(phone):
         cursor.execute('SELECT * FROM users WHERE phone = ?', (phone,))
         return cursor.fetchone()
 
-# Получение согласия по телефону
+# Получение согласия по телефону (фикс бага: один fetchone)
 def get_consent_by_phone(phone):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT consent FROM users WHERE phone = ?', (phone,))
-        return cursor.fetchone()[0] if cursor.fetchone() else None
+        result = cursor.fetchone()
+        return result[0] if result else None
 
 # Обновление согласия по телефону
 def update_consent_by_phone(phone, consent):
@@ -257,12 +258,13 @@ def save_or_update_user(telegram_id, phone, name, surname, category, user_group,
             logger.info(f"Создан новый профиль для {name} {surname}, отправлен на модерацию")
         conn.commit()
 
-# Получение статуса профиля по telegram_id
+# Получение статуса профиля по telegram_id (фикс: один fetchone)
 def get_profile_status_by_telegram_id(telegram_id):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT profile_status FROM users WHERE telegram_id = ?', (telegram_id,))
-        return cursor.fetchone()[0] if cursor.fetchone() else None
+        result = cursor.fetchone()
+        return result[0] if result else None
 
 # Получение активных событий
 def get_active_events():
@@ -320,7 +322,8 @@ def get_info_section_text(section_name):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT text FROM info_sections WHERE section_name = ?', (section_name,))
-        return cursor.fetchone()[0] if cursor.fetchone() else None
+        result = cursor.fetchone()
+        return result[0] if result else None
 
 # Получение статистики админа
 def get_admin_stats():
@@ -349,13 +352,13 @@ def update_profile_status(user_id, status):
         cursor.execute('UPDATE users SET profile_status = ? WHERE id = ?', (status, user_id))
         conn.commit()
 
-# Получение telegram_id по user_id
+# Получение telegram_id по user_id (фикс: один fetchone)
 def get_telegram_id_by_user_id(user_id):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT telegram_id FROM users WHERE id = ?', (user_id,))
         result = cursor.fetchone()
-        return result[0] if result else None  # Возвращаем None явно, если нет
+        return result[0] if result else None
 
 # Добавление события
 def add_event(date, time, location, description, capacity):
@@ -400,7 +403,8 @@ def get_event_status(event_id):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT status FROM events WHERE id = ?', (event_id,))
-        return cursor.fetchone()[0] if cursor.fetchone() else None
+        result = cursor.fetchone()
+        return result[0] if result else None
 
 # Обновление статуса события
 def update_event_status(event_id, status):
@@ -487,26 +491,29 @@ def add_non_attendance_reason(reg_id, reason):
         cursor.execute('INSERT INTO non_attendance (registration_id, reason) VALUES (?, ?)', (reg_id, reason))
         conn.commit()
 
-# Получение user_id по telegram_id
+# Получение user_id по telegram_id (фикс: один fetchone)
 def get_user_id_by_telegram_id(telegram_id):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT id FROM users WHERE telegram_id = ?', (telegram_id,))
-        return cursor.fetchone()[0] if cursor.fetchone() else None
+        result = cursor.fetchone()
+        return result[0] if result else None
 
 # Получение емкости события
 def get_event_capacity(event_id):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT capacity FROM events WHERE id = ?', (event_id,))
-        return cursor.fetchone()[0] if cursor.fetchone() else None
+        result = cursor.fetchone()
+        return result[0] if result else None
 
 # Получение даты события
 def get_event_date(event_id):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT date FROM events WHERE id = ?', (event_id,))
-        return cursor.fetchone()[0] if cursor.fetchone() else None
+        result = cursor.fetchone()
+        return result[0] if result else None
 
 # Добавление регистрации
 def add_registration(user_id, event_id):
