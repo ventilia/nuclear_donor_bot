@@ -7,13 +7,16 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardMarkup, K
 
 from src.states.states import ProfilRegStates, ConsentStates, CancelReasonState, AskQuestionState
 from src.database.db import get_user_by_telegram_id, get_profile_status_by_telegram_id, get_active_events
-from src.database.db import get_donations_count_by_center, get_last_donation, get_donations_history, get_user_registrations, get_user_registrations_count
-from src.database.db import get_user_id_by_telegram_id, get_event_capacity, get_registrations_count as get_event_reg_count
+from src.database.db import get_donations_count_by_center, get_last_donation, get_donations_history, \
+    get_user_registrations, get_user_registrations_count
+from src.database.db import get_user_id_by_telegram_id, get_event_capacity, \
+    get_registrations_count as get_event_reg_count
 from src.database.db import get_event_date, add_registration, add_reminder, cancel_registration
 from src.database.db import add_non_attendance_reason, save_or_update_user, get_user_by_phone, get_consent_by_phone
 from src.database.db import update_consent_by_phone, add_question, logger, get_user_by_fio, get_connection
 
 user_router = Router()
+
 
 @user_router.message(Command(commands=['start']))
 async def start_handler(message: types.Message, state: FSMContext):
@@ -21,12 +24,14 @@ async def start_handler(message: types.Message, state: FSMContext):
     from src.bot import bot
     logger.info(f"Пользователь {message.from_user.id} вызвал команду /start")
     try:
-        await bot.send_photo(message.chat.id, types.FSInputFile('frame 3.jpg'), caption="Добро пожаловать в бот Дня Донора МИФИ! 💉❤️")
+        await bot.send_photo(message.chat.id, types.FSInputFile('frame 3.jpg'),
+                             caption="Добро пожаловать в бот Дня Донора МИФИ! 💉❤️")
     except FileNotFoundError:
         logger.warning("Файл 'frame 3.jpg' не найден, баннер не отправлен")
         await message.answer("Добро пожаловать в бот Дня Донора МИФИ! 💉❤️")
     try:
-        await bot.send_document(message.chat.id, types.FSInputFile('privacy_policy.pdf'), caption="Ознакомьтесь с пользовательским соглашением (политика конфиденциальности). 📄")
+        await bot.send_document(message.chat.id, types.FSInputFile('privacy_policy.pdf'),
+                                caption="Ознакомьтесь с пользовательским соглашением (политика конфиденциальности). 📄")
     except FileNotFoundError:
         logger.warning("Файл 'privacy_policy.pdf' не найден")
         await message.answer("Файл с пользовательским соглашением не найден. Обратитесь к администратору. ⚠️")
@@ -39,19 +44,31 @@ async def start_handler(message: types.Message, state: FSMContext):
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Согласен ✅", callback_data="consent_yes")
     keyboard.button(text="Нет ❌", callback_data="consent_no")
-    await message.answer("Я ознакомился с пользовательским соглашением и обязуюсь прочитать информацию из /info перед регистрацией на любое мероприятие. 📄",
-                         reply_markup=keyboard.as_markup())
+    await message.answer(
+        "Я ознакомился с пользовательским соглашением и обязуюсь прочитать информацию из /info перед регистрацией на любое мероприятие. 📄",
+        reply_markup=keyboard.as_markup())
+
 
 @user_router.callback_query(lambda c: c.data in ['consent_yes', 'consent_no'], ConsentStates.consent)
 async def process_initial_consent(callback_query: types.CallbackQuery, state: FSMContext):
     if callback_query.data == 'consent_yes':
         await state.update_data(initial_consent=True)
+        # Если пользователь уже в базе (по телефону), обновляем consent
+        data = await state.get_data()
+        phone = data.get('phone')
+        if phone:
+            try:
+                update_consent_by_phone(phone, 1)
+                logger.info(f"Обновлено согласие (consent=1) для телефона {phone} в process_initial_consent")
+            except Exception as e:
+                logger.error(f"Ошибка при обновлении согласия для телефона {phone}: {e}")
         keyboard = ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="Поделиться номером телефона 📞", request_contact=True)]],
             resize_keyboard=True,
             one_time_keyboard=True
         )
-        await callback_query.message.answer("Спасибо! Теперь поделитесь номером телефона для авторизации. 🔑", reply_markup=keyboard)
+        await callback_query.message.answer("Спасибо! Теперь поделитесь номером телефона для авторизации. 🔑",
+                                            reply_markup=keyboard)
         await state.set_state(ProfilRegStates.phone_confirm)
         logger.info(f"Пользователь {callback_query.from_user.id} принял согласие (ознакомление с PDF и /info)")
     else:
@@ -59,6 +76,7 @@ async def process_initial_consent(callback_query: types.CallbackQuery, state: FS
         await state.clear()
         logger.info(f"Пользователь {callback_query.from_user.id} отказался от согласия")
     await callback_query.answer()
+
 
 @user_router.message(ProfilRegStates.phone_confirm)
 async def process_phone(message: types.Message, state: FSMContext):
@@ -72,7 +90,7 @@ async def process_phone(message: types.Message, state: FSMContext):
         await state.update_data(phone=phone)
         if user:
             await state.update_data(fio=user[3], category=user[4], group=user[5], social_contacts=user[6])
-            response = f"Вы уже в базе: {user[3]}, категория: {user[4]}, группа: {user[5]}. Подтверждаете? (Да/Нет) ✅/❌"
+            response = f"Вы уже в базе: {user[3]}, категория: {user[4]}, группа: {user[5] or 'Нет'}. Подтверждаете? (Да/Нет) ✅/❌"
             keyboard = InlineKeyboardBuilder()
             keyboard.button(text="Да ✅", callback_data="confirm_yes")
             keyboard.button(text="Нет ❌", callback_data="confirm_no")
@@ -84,52 +102,40 @@ async def process_phone(message: types.Message, state: FSMContext):
         logger.error(f"Ошибка при проверке телефона {phone}: {e}")
         await message.answer("Произошла ошибка при проверке телефона. Попробуйте позже. ⚠️")
 
+
 @user_router.callback_query(lambda c: c.data in ['confirm_yes', 'confirm_no'])
 async def confirm_existing(callback_query: types.CallbackQuery, state: FSMContext):
     # Локальный импорт bot внутри функции
     from src.bot import bot
     if callback_query.data == 'confirm_yes':
         data = await state.get_data()
-        phone = data['phone']
+        phone = data.get('phone')
+        initial_consent = data.get('initial_consent', False)
         try:
-            consent = get_consent_by_phone(phone)
-            if consent is None or not consent:
-                try:
-                    await bot.send_document(callback_query.message.chat.id, types.FSInputFile('privacy_policy.pdf'), caption="Ознакомьтесь с пользовательским соглашением (политика конфиденциальности). 📄")
-                except FileNotFoundError:
-                    logger.warning("Файл 'privacy_policy.pdf' не найден")
-                    await callback_query.message.answer("Файл с пользовательским соглашением не найден. Обратитесь к администратору. ⚠️")
-                    return
-                except Exception as e:
-                    logger.error(f"Ошибка при отправке PDF: {e}")
-                    await callback_query.message.answer("Произошла ошибка при отправке соглашения. Попробуйте позже. ⚠️")
-                    return
-                await state.set_state(ConsentStates.consent)
-                keyboard = InlineKeyboardBuilder()
-                keyboard.button(text="Согласен ✅", callback_data="consent_yes")
-                keyboard.button(text="Нет ❌", callback_data="consent_no")
-                await callback_query.message.answer("Я ознакомился с пользовательским соглашением и обязуюсь прочитать информацию из /info перед регистрацией на любое мероприятие. 📄",
-                                                    reply_markup=keyboard.as_markup())
-                logger.info(f"Пользователь {phone} должен подтвердить согласие (с PDF и /info)")
-            else:
-                await callback_query.message.answer("Авторизация успешна! 🎉")
-                help_text = ("Вот команды пользователя: 📋\n"
-                             "/profilReg - Зарегистрировать профиль ✍️\n"
-                             "/reg - Записаться на мероприятие 📅\n"
-                             "/profil - Посмотреть/изменить профиль 👤\n"
-                             "/stats - Моя статистика 📊\n"
-                             "/info - Информационные разделы 📖\n"
-                             "/ask - Задать вопрос организаторам ❓\n"
-                             "/help - Показать этот список ❓")
-                await callback_query.message.answer(help_text)
-                await state.clear()
-                logger.info(f"Успешная авторизация пользователя {phone}")
+            # Если пользователь дал начальное согласие, обновляем consent в базе
+            if initial_consent:
+                update_consent_by_phone(phone, 1)
+                logger.info(f"Обновлено согласие (consent=1) для телефона {phone} после подтверждения профиля")
+
+            await callback_query.message.answer("Авторизация успешна! 🎉")
+            help_text = ("Вот команды пользователя: 📋\n"
+                         "/profilReg - Зарегистрировать профиль ✍️\n"
+                         "/reg - Записаться на мероприятие 📅\n"
+                         "/profil - Посмотреть/изменить профиль 👤\n"
+                         "/stats - Моя статистика 📊\n"
+                         "/info - Информационные разделы 📖\n"
+                         "/ask - Задать вопрос организаторам ❓\n"
+                         "/help - Показать этот список ❓")
+            await callback_query.message.answer(help_text)
+            await state.clear()
+            logger.info(f"Успешная авторизация пользователя с телефоном {phone}")
         except Exception as e:
-            logger.error(f"Ошибка при проверке согласия для телефона {phone}: {e}")
+            logger.error(f"Ошибка при авторизации для телефона {phone}: {e}")
             await callback_query.message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
     else:
         await profil_reg_handler(callback_query.message, state)
     await callback_query.answer()
+
 
 @user_router.callback_query(lambda c: c.data in ['consent_yes', 'consent_no'], ConsentStates.consent)
 async def process_consent(callback_query: types.CallbackQuery, state: FSMContext):
@@ -140,7 +146,17 @@ async def process_consent(callback_query: types.CallbackQuery, state: FSMContext
             if phone:
                 update_consent_by_phone(phone, 1)
             await callback_query.message.answer("Согласие принято! Авторизация успешна. 🎉")
-            logger.info(f"Пользователь {phone or callback_query.from_user.id} принял согласие (ознакомление с PDF и /info)")
+            help_text = ("Вот команды пользователя: 📋\n"
+                         "/profilReg - Зарегистрировать профиль ✍️\n"
+                         "/reg - Записаться на мероприятие 📅\n"
+                         "/profil - Посмотреть/изменить профиль 👤\n"
+                         "/stats - Моя статистика 📊\n"
+                         "/info - Информационные разделы 📖\n"
+                         "/ask - Задать вопрос организаторам ❓\n"
+                         "/help - Показать этот список ❓")
+            await callback_query.message.answer(help_text)
+            logger.info(
+                f"Пользователь {phone or callback_query.from_user.id} принял согласие (ознакомление с PDF и /info)")
         else:
             await callback_query.message.answer("Без согласия бот не может работать. До свидания. 👋")
             logger.info(f"Пользователь {phone or callback_query.from_user.id} отказался от согласия")
@@ -149,6 +165,7 @@ async def process_consent(callback_query: types.CallbackQuery, state: FSMContext
         logger.error(f"Ошибка при обновлении согласия для телефона {phone}: {e}")
         await callback_query.message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
     await callback_query.answer()
+
 
 @user_router.message(Command(commands=['profilReg']))
 async def profil_reg_handler(message: types.Message, state: FSMContext):
@@ -160,6 +177,7 @@ async def profil_reg_handler(message: types.Message, state: FSMContext):
     await message.answer("Введите ваше ФИО (только буквы и пробелы, минимум фамилия и имя): ✍️", reply_markup=keyboard)
     logger.info(f"Пользователь {message.from_user.id} начал регистрацию профиля")
 
+
 @user_router.message(ProfilRegStates.fio)
 async def process_fio(message: types.Message, state: FSMContext):
     if message.text == "Назад 🔙":
@@ -168,7 +186,8 @@ async def process_fio(message: types.Message, state: FSMContext):
         return
     fio = message.text.strip().title()
     if not re.match(r'^[А-Яа-яA-Za-z\s]+$', fio) or len(fio.split()) < 2:
-        await message.answer("ФИО должно содержать только буквы и пробелы, минимум два слова (фамилия и имя). Попробуйте снова. ⚠️")
+        await message.answer(
+            "ФИО должно содержать только буквы и пробелы, минимум два слова (фамилия и имя). Попробуйте снова. ⚠️")
         logger.warning(f"Некорректное ФИО от пользователя {message.from_user.id}: {fio}")
         return
     await state.update_data(fio=fio)
@@ -180,7 +199,8 @@ async def process_fio(message: types.Message, state: FSMContext):
             keyboard = InlineKeyboardBuilder()
             keyboard.button(text="Да ✅", callback_data="previously_used_yes")
             keyboard.button(text="Нет ❌", callback_data="previously_used_no")
-            await message.answer("Пользовались ли вы ботом ранее? (Мы нашли совпадение по ФИО без номера телефона)", reply_markup=keyboard.as_markup())
+            await message.answer("Пользовались ли вы ботом ранее? (Мы нашли совпадение по ФИО без номера телефона)",
+                                 reply_markup=keyboard.as_markup())
         else:
             await state.set_state(ProfilRegStates.category)
             keyboard = InlineKeyboardBuilder()
@@ -192,6 +212,7 @@ async def process_fio(message: types.Message, state: FSMContext):
         logger.error(f"Ошибка при проверке ФИО {fio}: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
 
+
 @user_router.callback_query(lambda c: c.data in ['previously_used_yes', 'previously_used_no'])
 async def process_previously_used(callback_query: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -200,20 +221,29 @@ async def process_previously_used(callback_query: types.CallbackQuery, state: FS
     fio = data.get('fio')
     existing_user_id = data.get('existing_user_id')
     if callback_query.data == 'previously_used_yes':
-        # Обновляем существующего пользователя
+        # Проверяем, не занят ли номер телефона другим пользователем
         try:
             with get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''UPDATE users SET 
-                    telegram_id = ?, phone = ?, profile_status = 'pending'
-                    WHERE id = ?''',
-                    (telegram_id, phone, existing_user_id))
-                conn.commit()
-            await callback_query.message.answer("Ваш профиль обновлён и отправлен на модерацию. ⏳")
-            logger.info(f"Обновлён существующий профиль по ФИО {fio} для telegram_id {telegram_id}")
-            await state.clear()
+                cursor.execute('SELECT id FROM users WHERE phone = ? AND id != ?', (phone, existing_user_id))
+                if cursor.fetchone():
+                    await callback_query.message.answer(
+                        "Этот номер телефона уже используется другим пользователем. Пожалуйста, начните регистрацию заново с другим номером. ⚠️")
+                    await state.clear()
+                    logger.warning(f"Попытка обновления профиля по ФИО {fio} с занятым телефоном {phone}")
+                    await callback_query.answer()
+                    return
+            # Переходим к заполнению остальных полей
+            await state.set_state(ProfilRegStates.category)
+            keyboard = InlineKeyboardBuilder()
+            keyboard.button(text="Студент 🎓", callback_data="cat_student")
+            keyboard.button(text="Сотрудник 👔", callback_data="cat_employee")
+            keyboard.button(text="Внешний донор 🌍", callback_data="cat_external")
+            await callback_query.message.answer("Выберите категорию: 📂", reply_markup=keyboard.as_markup())
+            logger.info(
+                f"Пользователь {telegram_id} подтвердил использование профиля по ФИО {fio}, переходит к выбору категории")
         except Exception as e:
-            logger.error(f"Ошибка при обновлении профиля по ФИО {fio}: {e}")
+            logger.error(f"Ошибка при проверке телефона {phone} для профиля по ФИО {fio}: {e}")
             await callback_query.message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
     else:
         # Продолжаем как новый
@@ -223,7 +253,9 @@ async def process_previously_used(callback_query: types.CallbackQuery, state: FS
         keyboard.button(text="Сотрудник 👔", callback_data="cat_employee")
         keyboard.button(text="Внешний донор 🌍", callback_data="cat_external")
         await callback_query.message.answer("Выберите категорию: 📂", reply_markup=keyboard.as_markup())
+        logger.info(f"Пользователь {telegram_id} выбрал создание нового профиля для ФИО {fio}")
     await callback_query.answer()
+
 
 @user_router.callback_query(lambda c: c.data.startswith('cat_'))
 async def process_category(callback_query: types.CallbackQuery, state: FSMContext):
@@ -246,6 +278,7 @@ async def process_category(callback_query: types.CallbackQuery, state: FSMContex
     await callback_query.answer()
     logger.info(f"Пользователь {callback_query.from_user.id} выбрал категорию: {category}")
 
+
 @user_router.message(ProfilRegStates.group)
 async def process_group(message: types.Message, state: FSMContext):
     if message.text == "Назад 🔙":
@@ -254,7 +287,8 @@ async def process_group(message: types.Message, state: FSMContext):
             keyboard=[[KeyboardButton(text="Назад 🔙")]],
             resize_keyboard=True
         )
-        await message.answer("Введите ваше ФИО (только буквы и пробелы, минимум фамилия и имя): ✍️", reply_markup=keyboard)
+        await message.answer("Введите ваше ФИО (только буквы и пробелы, минимум фамилия и имя): ✍️",
+                             reply_markup=keyboard)
         return
     group = message.text.strip().upper()
     if not re.match(r'^[А-Я]\d{2}-\d{3}$', group):
@@ -268,6 +302,7 @@ async def process_group(message: types.Message, state: FSMContext):
         resize_keyboard=True
     )
     await message.answer("Введите контакты в соцсетях (или 'нет'): 🔗", reply_markup=keyboard)
+
 
 @user_router.message(ProfilRegStates.social_contacts)
 async def process_social_contacts(message: types.Message, state: FSMContext):
@@ -287,18 +322,35 @@ async def process_social_contacts(message: types.Message, state: FSMContext):
                 keyboard=[[KeyboardButton(text="Назад 🔙")]],
                 resize_keyboard=True
             )
-            await message.answer("Введите ваше ФИО (только буквы и пробелы, минимум фамилия и имя): ✍️", reply_markup=keyboard)
+            await message.answer("Введите ваше ФИО (только буквы и пробелы, минимум фамилия и имя): ✍️",
+                                 reply_markup=keyboard)
         return
     social_contacts = message.text.strip() if message.text.strip().lower() != 'нет' else None
     data = await state.get_data()
     try:
-        save_or_update_user(message.from_user.id, data.get('phone'), data['fio'],
-                            data['category'], data.get('group'), social_contacts)
+        # Если пользователь выбрал "previously_used_yes", обновляем существующего
+        if data.get('existing_user_id'):
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''UPDATE users SET 
+                    telegram_id = ?, phone = ?, category = ?, user_group = ?, social_contacts = ?, profile_status = 'pending'
+                    WHERE id = ?''',
+                               (message.from_user.id, data.get('phone'), data['category'], data.get('group'),
+                                social_contacts, data['existing_user_id']))
+                conn.commit()
+            logger.info(
+                f"Обновлён существующий профиль ID {data['existing_user_id']} для ФИО {data['fio']} с telegram_id {message.from_user.id}")
+        else:
+            # Создаём нового пользователя
+            save_or_update_user(message.from_user.id, data.get('phone'), data['fio'],
+                                data['category'], data.get('group'), social_contacts)
+            logger.info(f"Создан или обновлён профиль для ФИО {data['fio']} с telegram_id {message.from_user.id}")
         await state.clear()
         await message.answer("Ваш профиль отправлен на модерацию. ⏳", reply_markup=types.ReplyKeyboardRemove())
     except Exception as e:
         logger.error(f"Ошибка при сохранении/обновлении профиля пользователя {data.get('fio', 'Unknown')}: {e}")
         await message.answer("Произошла ошибка при сохранении профиля. Попробуйте позже. ⚠️")
+
 
 @user_router.message(Command(commands=['help']))
 async def help_handler(message: types.Message):
@@ -311,6 +363,7 @@ async def help_handler(message: types.Message):
                          "/ask - Задать вопрос организаторам ❓\n"
                          "/help - Показать этот список")
     logger.info(f"Пользователь {message.from_user.id} вызвал команду /help")
+
 
 @user_router.message(Command(commands=['reg']))
 async def reg_handler(message: types.Message):
@@ -333,6 +386,7 @@ async def reg_handler(message: types.Message):
     except Exception as e:
         logger.error(f"Ошибка при получении мероприятий: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
+
 
 @user_router.callback_query(lambda c: c.data.startswith('reg_'))
 async def process_register(callback_query: types.CallbackQuery):
@@ -361,6 +415,7 @@ async def process_register(callback_query: types.CallbackQuery):
         logger.error(f"Ошибка при регистрации пользователя {user_id} на мероприятие {event_id}: {e}")
         await callback_query.answer("Произошла ошибка при регистрации. Попробуйте позже. ⚠️")
 
+
 @user_router.message(Command(commands=['profil']))
 async def profil_handler(message: types.Message, state: FSMContext):
     try:
@@ -379,7 +434,7 @@ async def profil_handler(message: types.Message, state: FSMContext):
         history_str = "\n".join([f"{d[0]} - {d[1]}" for d in history]) if history else "Нет истории"
         dkm_str = "Да" if user[6] else "Нет"
         response = (
-            f"Ваш профиль: 📋\nФИО: {user[3]}\nКатегория: {user[4]}\nГруппа: {user[5]}\n"
+            f"Ваш профиль: 📋\nФИО: {user[3]}\nКатегория: {user[4]}\nГруппа: {user[5] or 'Нет'}\n"
             f"Соцсети: {user[6] or 'Нет'} 🔗\nСтатус: {user[9]} ⚙️\n"
             f"Количество донаций: {sum_donations} 💉\nПоследняя донация: {last_date_center} 📅\n"
             f"Вступление в ДКМ: {dkm_str} 🦴\nИстория донаций:\n{history_str}")
@@ -398,6 +453,7 @@ async def profil_handler(message: types.Message, state: FSMContext):
         logger.error(f"Ошибка при получении профиля пользователя {message.from_user.id}: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
 
+
 @user_router.callback_query(lambda c: c.data.startswith('unreg_'))
 async def process_unreg(callback_query: types.CallbackQuery, state: FSMContext):
     event_id = int(callback_query.data.split('_')[1])
@@ -413,11 +469,13 @@ async def process_unreg(callback_query: types.CallbackQuery, state: FSMContext):
                       [KeyboardButton(text="Не захотел 😔")]],
             resize_keyboard=True
         )
-        await callback_query.message.answer("Регистрация отменена. Пожалуйста, укажите причину отмены:", reply_markup=keyboard)
+        await callback_query.message.answer("Регистрация отменена. Пожалуйста, укажите причину отмены:",
+                                            reply_markup=keyboard)
         logger.info(f"Пользователь {user_id} отменил регистрацию на мероприятие {event_id}, запрошенная причина")
     except Exception as e:
         logger.error(f"Ошибка при отмене регистрации пользователя {user_id} на {event_id}: {e}")
         await callback_query.answer("Произошла ошибка. Попробуйте позже. ⚠️")
+
 
 def get_registration_id(user_id, event_id):
     # Используем get_connection из db.py
@@ -427,6 +485,7 @@ def get_registration_id(user_id, event_id):
         cursor.execute('SELECT id FROM registrations WHERE user_id = ? AND event_id = ?', (user_id, event_id))
         result = cursor.fetchone()
         return result[0] if result else None
+
 
 @user_router.message(CancelReasonState.reason)
 async def process_cancel_reason(message: types.Message, state: FSMContext):
@@ -438,6 +497,7 @@ async def process_cancel_reason(message: types.Message, state: FSMContext):
         await message.answer("Причина отмены записана. Спасибо!", reply_markup=types.ReplyKeyboardRemove())
         logger.info(f"Записана причина отмены для reg {reg_id}: {reason}")
     await state.clear()
+
 
 @user_router.message(Command(commands=['stats']))
 async def stats_handler(message: types.Message):
@@ -454,6 +514,7 @@ async def stats_handler(message: types.Message):
         logger.error(f"Ошибка при получении статистики пользователя {message.from_user.id}: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже. ⚠️")
 
+
 @user_router.message(Command(commands=['ask']))
 async def ask_handler(message: types.Message, state: FSMContext):
     profile_status = get_profile_status_by_telegram_id(message.from_user.id)
@@ -466,6 +527,7 @@ async def ask_handler(message: types.Message, state: FSMContext):
         resize_keyboard=True
     )
     await message.answer("Введите ваш вопрос или сообщение организаторам:", reply_markup=keyboard)
+
 
 @user_router.message(AskQuestionState.text)
 async def process_ask_text(message: types.Message, state: FSMContext):
@@ -482,11 +544,13 @@ async def process_ask_text(message: types.Message, state: FSMContext):
     try:
         user_id = get_user_id_by_telegram_id(message.from_user.id)
         question_id = add_question(user_id, text)
-        await message.answer("Ваш вопрос отправлен организаторам. Они ответят в ближайшее время.", reply_markup=types.ReplyKeyboardRemove())
+        await message.answer("Ваш вопрос отправлен организаторам. Они ответят в ближайшее время.",
+                             reply_markup=types.ReplyKeyboardRemove())
         admins = [123456789, 1653833795, 1191457973]
         for admin_id in admins:
             try:
-                await bot.send_message(admin_id, f"Новый вопрос от пользователя ID {user_id}: {text}\nОтветьте через /answer")
+                await bot.send_message(admin_id,
+                                       f"Новый вопрос от пользователя ID {user_id}: {text}\nОтветьте через /answer")
             except Exception as e:
                 logger.error(f"Ошибка при отправке уведомления админу {admin_id}: {e}")
         logger.info(f"Пользователь {message.from_user.id} задал вопрос: {text}")
@@ -494,6 +558,7 @@ async def process_ask_text(message: types.Message, state: FSMContext):
         logger.error(f"Ошибка при отправке вопроса от {message.from_user.id}: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже.")
     await state.clear()
+
 
 def register_user_handlers(dp):
     dp.include_router(user_router)
